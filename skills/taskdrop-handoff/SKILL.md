@@ -13,7 +13,7 @@ Create a self-contained Markdown checkpoint, then store it through the TaskDrop 
 - Existing TaskDrop code supplied: call `get_handoff`, use its numeric `latestRevision` as `baseRevision`, then call `append_revision`.
 - User only asks to resume or inspect a handoff: call `get_handoff` with `revision: "latest"` and do not append unless asked.
 
-Never ask for or include the user's TaskDrop Token in tool arguments or Markdown. Authentication belongs to the MCP connection configuration.
+Never ask for or include the user's TaskDrop Space Key in tool arguments or Markdown. Access belongs to the MCP connection configuration.
 
 ## Preserve information in this order
 
