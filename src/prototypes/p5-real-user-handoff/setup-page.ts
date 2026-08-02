@@ -102,9 +102,8 @@ q  Stop Server and destroy in-memory state</pre>
         "read -s TASKDROP_P5_SPACE_KEY",
         "echo",
         "export TASKDROP_P5_SPACE_KEY",
-        "codex mcp add taskdrop-p5 --url " + endpoint + " --bearer-token-env-var TASKDROP_P5_SPACE_KEY",
-        "# Restart Codex from this shell so it inherits TASKDROP_P5_SPACE_KEY."
-      ].join("\\n");
+        "codex mcp add taskdrop-p5 --url " + endpoint + " --bearer-token-env-var TASKDROP_P5_SPACE_KEY"
+      ].join(" && ");
     };
 
     document.querySelector("#generate").addEventListener("click", () => {
