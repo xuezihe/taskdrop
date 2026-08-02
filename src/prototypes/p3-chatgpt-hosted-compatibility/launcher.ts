@@ -10,6 +10,7 @@ import {
   spawnSync,
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
+import { createInterface } from "node:readline";
 
 import type { LifecycleStage } from "./lifecycle-recorder.js";
 import { startP3Server, type P3Server } from "./server.js";
@@ -24,6 +25,8 @@ let expectedFingerprint = "(pending)";
 let preflight = "pending";
 let clipboard = "empty";
 let shuttingDown = false;
+let lastRenderedSequence = 0;
+let lastRenderedStatus = "";
 
 await main().catch(async () => {
   console.error("P3 launcher failed; sensitive error details were suppressed.");
@@ -77,6 +80,7 @@ async function main(): Promise<void> {
   const credentialUrl = `${publicOrigin}/mcp?taskdropKey=${encodeURIComponent(spaceKey)}`;
   await runPublicPreflight(credentialUrl);
   preflight = "passed";
+  server.recorder.setStage("tool-scan");
 
   await writeClipboard(credentialUrl);
   clipboard = "contains disposable endpoint";
@@ -89,7 +93,7 @@ async function main(): Promise<void> {
     }
   });
 
-  startKeyboardLoop();
+  startOperatorLoop();
 }
 
 function requireExecutable(command: string, args: string[]): void {
@@ -291,48 +295,41 @@ async function postRpc(
   }
 }
 
-function startKeyboardLoop(): void {
+function startOperatorLoop(): void {
   if (!process.stdin.isTTY) {
     throw new Error("P3 launcher requires an interactive terminal");
   }
 
-  process.stdin.setRawMode(true);
-  process.stdin.resume();
-  process.stdin.setEncoding("utf8");
-  process.stdin.on("data", (input: string) => {
-    void handleKey(input).catch(() => {
+  const input = createInterface({ input: process.stdin, output: process.stdout });
+  input.on("line", (line) => {
+    void handleCommand(line).catch(() => {
       preflight = "operator action failed";
       render();
     });
   });
-
 }
 
-async function handleKey(input: string): Promise<void> {
+async function handleCommand(input: string): Promise<void> {
+  const command = input.trim().toLowerCase();
   const stages: Partial<Record<string, Exclude<LifecycleStage, "preflight">>> = {
-    "1": "tool-scan",
-    "2": "first-call",
     "3": "later-call",
     "4": "reopened-conversation",
     "5": "refresh-reconnect",
   };
-  const stage = stages[input];
+  const stage = stages[command];
   if (stage) {
-    if (stage === "tool-scan" && clipboard !== "cleared") {
-      await clearClipboard();
-    }
     server?.recorder.setStage(stage);
     render();
     return;
   }
 
-  if (input === "c") {
+  if (command === "c") {
     await clearClipboard();
     render();
     return;
   }
 
-  if (input === "q" || input === "\u0003") {
+  if (command === "q") {
     await shutdown(0);
   }
 }
@@ -349,84 +346,41 @@ async function writeClipboard(value: string): Promise<void> {
 async function clearClipboard(): Promise<void> {
   await writeClipboard("");
   clipboard = "cleared";
+  render();
 }
 
 function render(): void {
-  if (process.stdout.isTTY) {
-    console.clear();
-  }
-
-  console.log("TASKDROP P3 - PROTOTYPE / THROW AWAY");
-  console.log("Target: ChatGPT Business / Owner / Web / Standard Chat / Draft app");
-  console.log(`Public origin: ${publicOrigin}`);
-  console.log("Endpoint query: intentionally omitted");
-  console.log(`Expected credential fingerprint: ${expectedFingerprint}`);
-  console.log(`Public preflight: ${preflight}`);
-  console.log(`Clipboard: ${clipboard}`);
-  renderSnapshot();
-  console.log("");
-  console.log("[1] Tool Scan  [2] First call  [3] Later call");
-  console.log("[4] Reopened conversation  [5] Refresh/reconnect");
-  console.log("[c] Clear clipboard  [q] Stop and destroy in-memory state");
-}
-
-function renderSnapshot(): void {
   const snapshot = server?.snapshot();
-  console.log("Handoffs (Markdown omitted):");
-  if (!snapshot || snapshot.handoffs.length === 0) {
-    console.log("  (empty)");
-  } else {
-    for (const space of snapshot.handoffs) {
-      const handoffs = space.handoffs
-        .map((handoff) => {
-          const revisions = handoff.revisions
-            .map((revision) => `${revision.revision}:${revision.markdownLength}c`)
-            .join(",");
-          return `${handoff.code}[${revisions}]`;
-        })
-        .join(" ");
-      console.log(`  ${space.scopeHash}: ${handoffs}`);
-    }
-  }
-
-  console.log("Lifecycle summary (query/arguments omitted):");
-  const stages: LifecycleStage[] = [
-    "preflight",
-    "tool-scan",
-    "first-call",
-    "later-call",
-    "reopened-conversation",
-    "refresh-reconnect",
-  ];
-  const observations = snapshot?.lifecycle.observations ?? [];
-  for (const stage of stages) {
-    const stageObservations = observations.filter((item) => item.stage === stage);
-    const matched = stageObservations.filter(
-      (item) => item.authentication === "accepted" && item.credentialMatchedExpected,
-    ).length;
-    const rejected = stageObservations.filter(
-      (item) => item.authentication !== "accepted",
-    ).length;
-    const calls = stageObservations
-      .filter((item) => item.toolName)
-      .map((item) => item.toolName)
-      .join(",") || "-";
-    const sessions = stageObservations.some(
-      (item) => item.requestHadSession || item.responseHadSession,
-    )
-      ? "yes"
-      : "no";
+  const status = [
+    publicOrigin,
+    preflight,
+    clipboard,
+    snapshot?.lifecycle.currentStage ?? "preflight",
+  ].join("|");
+  const statusChanged = status !== lastRenderedStatus;
+  if (statusChanged) {
+    lastRenderedStatus = status;
     console.log(
-      `  ${stage}: requests=${stageObservations.length} matched=${matched} rejected=${rejected} session=${sessions} calls=${calls}`,
+      `[state] preflight=${preflight} stage=${snapshot?.lifecycle.currentStage ?? "preflight"} clipboard=${clipboard}`,
     );
   }
 
-  const last = observations.at(-1);
-  console.log(
-    last
-      ? `Last: #${last.sequence} ${last.stage} ${last.rpcMethod}${last.toolName ? `/${last.toolName}` : ""} auth=${last.authentication} match=${last.credentialMatchedExpected} status=${last.responseStatus}`
-      : "Last: (none)",
-  );
+  for (const observation of snapshot?.lifecycle.observations ?? []) {
+    if (observation.sequence <= lastRenderedSequence) continue;
+    lastRenderedSequence = observation.sequence;
+    console.log(
+      `[mcp] #${observation.sequence} stage=${observation.stage} rpc=${observation.rpcMethod}${observation.toolName ? ` tool=${observation.toolName}` : ""} auth=${observation.authentication} match=${observation.credentialMatchedExpected} status=${observation.responseStatus}`,
+    );
+  }
+
+  if (
+    statusChanged &&
+    preflight === "passed" &&
+    snapshot?.lifecycle.currentStage === "tool-scan"
+  ) {
+    console.log("[ready] Scan Tools now; the first ChatGPT tool call will enter first-call automatically.");
+    console.log("[commands] 3 later-call | 4 reopened | 5 refresh/reconnect | c clear clipboard | q quit");
+  }
 }
 
 async function shutdown(exitCode: number): Promise<never> {
@@ -436,7 +390,6 @@ async function shutdown(exitCode: number): Promise<never> {
   shuttingDown = true;
 
   if (process.stdin.isTTY) {
-    process.stdin.setRawMode(false);
     process.stdin.pause();
   }
 

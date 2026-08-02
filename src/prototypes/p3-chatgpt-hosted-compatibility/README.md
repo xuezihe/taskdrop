@@ -37,23 +37,28 @@ When preflight says `passed`:
 1. In ChatGPT Business Web, enable Developer Mode.
 2. Create a draft custom app for the endpoint copied to the clipboard.
 3. Select `No Authentication` because the disposable credential is in the URL.
-4. Return to the terminal and press `[1]`; this marks Tool Scan and clears the
-   clipboard. Then click Scan Tools.
+4. Return to the terminal, type `c`, and press Return to clear the clipboard.
+   Then click Scan Tools. Tool Scan is recorded automatically.
 5. Verify `create_handoff`, `get_handoff`, and `append_revision` are visible.
-6. Press `[2]`, then complete `create -> get latest -> append -> get latest` in
-   Standard Chat. Accept and record any write confirmation.
-7. Press `[3]`, then call `get_handoff` again later in the same conversation.
-8. Press `[4]`, reopen the conversation, and call `get_handoff`.
-9. Press `[5]`, refresh ChatGPT Web, reconnect/select the app if needed, and
-   call `get_handoff` again.
+6. Complete `create -> get latest -> append -> get latest` in Standard Chat.
+   The first ChatGPT tool call enters the `first-call` stage automatically.
+   Accept and record any write confirmation.
+7. Type `3` and press Return, then call `get_handoff` again later in the same
+   conversation.
+8. Type `4` and press Return, reopen the conversation, and call `get_handoff`.
+9. Type `5` and press Return, refresh ChatGPT Web, reconnect/select the app if
+   needed, and call `get_handoff` again.
 10. Record the actual action policy, confirmation behavior, visible tools, and
     call results. Do not copy the endpoint or Space Key into evidence.
-11. Delete the draft app, then press `[q]`. The launcher stops the Quick Tunnel,
-    destroys in-memory Handoffs, and clears the clipboard if still necessary.
+11. Delete the draft app, then type `q` and press Return. The launcher stops the
+    Quick Tunnel, destroys in-memory Handoffs, and clears the clipboard if
+    necessary.
 
-The terminal records only lifecycle stage, RPC method, tool name, sanitized
-carrier/fingerprint, protocol version, session presence, and response status.
-It omits raw URLs, query strings, credentials, tool arguments, and Markdown.
+The terminal appends one sanitized line for each MCP request instead of
+repainting a TUI. It records only lifecycle stage, RPC method, tool name,
+sanitized carrier/fingerprint, protocol version, session presence, and response
+status. It omits raw URLs, query strings, credentials, tool arguments, and
+Markdown.
 
 If any stage loses the query credential, stop and retain sanitized evidence.
 P3 must open a separate OAuth-to-Space design ticket rather than adding OAuth
