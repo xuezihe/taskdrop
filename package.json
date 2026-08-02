@@ -13,6 +13,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "prototype:p1": "pnpm build && node dist/prototypes/p1-codex-mcp-smoke/server.js",
     "verify": "pnpm check && pnpm test && pnpm build"
   },
   "dependencies": {
