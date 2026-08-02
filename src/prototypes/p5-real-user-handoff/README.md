@@ -25,7 +25,9 @@ analytics, URL parameters, `localStorage`, or `sessionStorage`.
 - Devin Desktop: HTTP transport, `serverUrl`, and an Authorization Bearer
   header. The generated JSON is a custom-server object for manual installation.
 - Codex: Streamable HTTP plus `bearer_token_env_var`. The generated shell
-  commands export the disposable Key and add `taskdrop-p5` through the CLI.
+  commands read the disposable Key without terminal echo, export it, and add
+  `taskdrop-p5` through the CLI. Copy the Key separately when the hidden prompt
+  waits for input; do not paste a literal Key into a shell command.
 - MCP connection setup and Handoff Skill setup are deliberately separate.
 
 Configuration references: [Devin MCP](https://docs.devin.ai/work-with-devin/mcp),

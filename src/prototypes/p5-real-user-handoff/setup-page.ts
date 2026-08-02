@@ -47,6 +47,7 @@ export function createSetupPage(endpoint: string): string {
   <section id="configs" class="step" hidden>
     <h2>2. Install the MCP connection</h2>
     <p class="muted">MCP connection setup grants access to tools. It does not teach the client how to package a high-fidelity Handoff.</p>
+    <button class="secondary copy" type="button" data-copy="key">Copy Space Key</button>
 
     <h3>Devin Desktop custom server object</h3>
     <pre id="devin-config"></pre>
@@ -84,8 +85,6 @@ q  Stop Server and destroy in-memory state</pre>
       return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
     };
 
-    const quoteShell = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
-
     const render = () => {
       document.querySelector("#key").textContent = spaceKey || "No key generated.";
       document.querySelector("#configs").hidden = !spaceKey;
@@ -100,7 +99,9 @@ q  Stop Server and destroy in-memory state</pre>
       }, null, 2);
 
       document.querySelector("#codex-config").textContent = [
-        "export TASKDROP_P5_SPACE_KEY=" + quoteShell(spaceKey),
+        "read -s TASKDROP_P5_SPACE_KEY",
+        "echo",
+        "export TASKDROP_P5_SPACE_KEY",
         "codex mcp add taskdrop-p5 --url " + endpoint + " --bearer-token-env-var TASKDROP_P5_SPACE_KEY",
         "# Restart Codex from this shell so it inherits TASKDROP_P5_SPACE_KEY."
       ].join("\\n");
