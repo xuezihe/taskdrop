@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "prototype:p1": "pnpm build && node dist/prototypes/p1-codex-mcp-smoke/server.js",
     "prototype:p2": "pnpm build && node dist/prototypes/p2-minimum-handoff/server.js",
+    "prototype:p3": "pnpm build && node dist/prototypes/p3-chatgpt-hosted-compatibility/launcher.js",
     "verify": "pnpm check && pnpm test && pnpm build"
   },
   "dependencies": {
