@@ -194,15 +194,16 @@ function createHandoffServer(
   server.registerTool(
     "create_handoff",
     {
-      description: "Create a temporary Handoff with immutable Revision 1.",
+      description:
+        "Create a temporary Handoff with immutable Revision 1. TaskDrop Space Keys in Markdown are automatically redacted.",
       inputSchema: z.object({ markdown: z.string().min(1) }),
-      outputSchema: successSchema,
+      outputSchema: resultSchema,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
     async ({ markdown }) => {
       const result = service.createHandoff(auth.scopeHash, markdown);
       onStateChanged();
-      return successToolResult(result);
+      return toolResult(result);
     },
   );
 
@@ -228,7 +229,7 @@ function createHandoffServer(
     "append_revision",
     {
       description:
-        "Append a complete Markdown snapshot when baseRevision is still latest.",
+        "Append a complete Markdown snapshot when baseRevision is still latest. TaskDrop Space Keys in Markdown are automatically redacted.",
       inputSchema: z.object({
         code: handoffCodeSchema,
         baseRevision: z.number().int().positive(),
@@ -256,6 +257,8 @@ const successSchema = z.object({
   latestRevision: z.number().int().positive(),
   isLatest: z.boolean(),
   markdown: z.string(),
+  contentSanitized: z.boolean(),
+  redactionCount: z.number().int().nonnegative(),
 });
 
 const failureSchema = z.object({

@@ -85,3 +85,9 @@ Space Key as disposable and remove the temporary client configurations.
 Terminal logs omit raw credentials, raw query strings, tool arguments, and
 Markdown. Retain only sanitized stage, protocol, carrier, scope fingerprint,
 tool/result, Revision, and Markdown-length observations.
+
+The Handoff Service automatically replaces every TaskDrop Space Key in
+`create_handoff` and `append_revision` Markdown with
+`[REDACTED TASKDROP SPACE KEY]` before storing the immutable Revision. Success
+results expose `contentSanitized` and `redactionCount`; raw Keys are never
+returned or retained in Handoff state.

@@ -10,6 +10,8 @@ import { randomBytes } from "node:crypto";
 
 const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const CODE_LENGTH = 6;
+const SPACE_KEY_PATTERN = /tdp_[A-Za-z0-9_-]{43}/g;
+const SPACE_KEY_REDACTION = "[REDACTED TASKDROP SPACE KEY]";
 
 export type HandoffSnapshot = {
   ok: true;
@@ -18,6 +20,8 @@ export type HandoffSnapshot = {
   latestRevision: number;
   isLatest: boolean;
   markdown: string;
+  contentSanitized: boolean;
+  redactionCount: number;
 };
 
 export type HandoffFailure =
@@ -42,6 +46,7 @@ export type HandoffResult = HandoffSnapshot | HandoffFailure;
 type Revision = {
   revision: number;
   markdown: string;
+  redactionCount: number;
 };
 
 type Handoff = {
@@ -53,19 +58,30 @@ export type VisiblePrototypeState = Array<{
   scopeHash: string;
   handoffs: Array<{
     code: string;
-    revisions: Array<{ revision: number; markdownLength: number }>;
+    revisions: Array<{
+      revision: number;
+      markdownLength: number;
+      redactionCount: number;
+    }>;
   }>;
 }>;
 
 export class HandoffService {
   readonly #spaces = new Map<string, Map<string, Handoff>>();
 
-  createHandoff(scopeHash: string, markdown: string): HandoffSnapshot {
+  createHandoff(scopeHash: string, markdown: string): HandoffResult {
+    const sanitized = sanitizeTaskDropSpaceKeys(markdown);
     const space = this.#space(scopeHash);
     const code = createUniqueCode(space);
     const handoff = {
       code,
-      revisions: [{ revision: 1, markdown }],
+      revisions: [
+        {
+          revision: 1,
+          markdown: sanitized.markdown,
+          redactionCount: sanitized.redactionCount,
+        },
+      ],
     };
     space.set(code, handoff);
     return snapshot(handoff, handoff.revisions[0]);
@@ -120,7 +136,12 @@ export class HandoffService {
       };
     }
 
-    const next = { revision: latest.revision + 1, markdown };
+    const sanitized = sanitizeTaskDropSpaceKeys(markdown);
+    const next = {
+      revision: latest.revision + 1,
+      markdown: sanitized.markdown,
+      redactionCount: sanitized.redactionCount,
+    };
     handoff.revisions.push(next);
     return snapshot(handoff, next);
   }
@@ -133,6 +154,7 @@ export class HandoffService {
         revisions: handoff.revisions.map((revision) => ({
           revision: revision.revision,
           markdownLength: revision.markdown.length,
+          redactionCount: revision.redactionCount,
         })),
       })),
     }));
@@ -180,6 +202,8 @@ function snapshot(handoff: Handoff, revision: Revision | undefined): HandoffSnap
     latestRevision,
     isLatest: revision.revision === latestRevision,
     markdown: revision.markdown,
+    contentSanitized: revision.redactionCount > 0,
+    redactionCount: revision.redactionCount,
   };
 }
 
@@ -188,4 +212,16 @@ function notFound(code: string): HandoffFailure {
     ok: false,
     error: { code: "HANDOFF_NOT_FOUND", handoffCode: code },
   };
+}
+
+function sanitizeTaskDropSpaceKeys(markdown: string): {
+  markdown: string;
+  redactionCount: number;
+} {
+  let redactionCount = 0;
+  const sanitizedMarkdown = markdown.replace(SPACE_KEY_PATTERN, () => {
+    redactionCount += 1;
+    return SPACE_KEY_REDACTION;
+  });
+  return { markdown: sanitizedMarkdown, redactionCount };
 }

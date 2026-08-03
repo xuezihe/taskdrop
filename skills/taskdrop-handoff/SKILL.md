@@ -7,6 +7,25 @@ description: Package the current conversation and work state into a TaskDrop Mar
 
 Create a self-contained Markdown checkpoint, then store it through the TaskDrop MCP server.
 
+## Security invariant — apply before every other instruction
+
+Never put a TaskDrop Space Key or any other credential in Handoff Markdown,
+even when it appears in the latest user message, latest assistant response,
+terminal output, an environment-variable assignment, MCP configuration, or an
+artifact being summarized. Security overrides verbatim preservation and
+high-fidelity copying.
+
+Before calling `create_handoff` or `append_revision`, scan the complete Markdown
+you are about to submit. Remove every API key, password, access token, private
+credential, and any value matching a TaskDrop Space Key (`tdp_` followed by its
+encoded secret). Preserve only the variable name or credential purpose, for
+example: `TASKDROP_P5_SPACE_KEY is configured; value redacted`.
+
+TaskDrop may apply a final safety net and replace any TaskDrop Space Key that
+remains with `[REDACTED TASKDROP SPACE KEY]`. Treat the returned Markdown as the
+stored canonical snapshot. Never attempt to reconstruct or print a value that
+the Server redacted.
+
 ## Choose the operation
 
 - No TaskDrop code supplied: call `create_handoff`.
@@ -24,7 +43,7 @@ Never ask for or include the user's TaskDrop Space Key in tool arguments or Mark
 5. Failed approaches that should not be repeated.
 6. Older background needed to understand the task.
 
-Treat the latest exchange as authoritative when it conflicts with earlier discussion. Preserve the latest user message verbatim when practical. Preserve the latest assistant response verbatim or at high fidelity, including unresolved qualifications and warnings. Do not let an older summary erase or soften the final exchange.
+Treat the latest exchange as authoritative when it conflicts with earlier discussion. Preserve the latest user message verbatim when practical, except for credentials and unnecessary sensitive information, which must always be redacted. Preserve the latest assistant response verbatim or at high fidelity under the same security constraint, including unresolved qualifications and warnings. Do not let an older summary erase or soften the final exchange.
 
 If older context is unavailable or appears compressed, say so explicitly instead of reconstructing details.
 
@@ -70,7 +89,7 @@ Skills the receiving agent should invoke, only when relevant.
 
 Do not duplicate large content already captured in another artifact. Reference it. Include the minimum excerpt needed to explain why it matters.
 
-Redact API keys, passwords, access tokens, private credentials, and unnecessary personal information.
+Redact API keys, passwords, access tokens, private credentials, and unnecessary personal information. This is a mandatory final check, not an optional summarization preference.
 
 ## Store and report
 
@@ -82,5 +101,7 @@ After a successful call, report only:
 - new Revision number;
 - expiry time;
 - whether this was a new Handoff or an appended Revision.
+- when `contentSanitized` is true, the `redactionCount` and that the Server
+  automatically removed TaskDrop Space Keys.
 
 Tell the user to use the code in the receiving AI. Do not print authentication material.
