@@ -18,6 +18,7 @@
     "prototype:p3": "pnpm build && node dist/prototypes/p3-chatgpt-hosted-compatibility/launcher.js",
     "prototype:p5": "pnpm build && node dist/prototypes/p5-real-user-handoff/server.js",
     "prototype:p6": "pnpm build && node dist/prototypes/p6-dual-era-contract/runner.js",
+    "prototype:setup-cli": "pnpm build && node dist/prototypes/p7-space-key-cli/cli.js",
     "verify": "pnpm check && pnpm test && pnpm build"
   },
   "dependencies": {
