@@ -19,7 +19,8 @@
     "prototype:p5": "pnpm build && node dist/prototypes/p5-real-user-handoff/server.js",
     "prototype:p6": "pnpm build && node dist/prototypes/p6-dual-era-contract/runner.js",
     "prototype:setup-cli": "pnpm build && node dist/prototypes/p7-space-key-cli/cli.js",
-    "verify": "pnpm check && pnpm test && pnpm build"
+    "setup:cli": "pnpm build && node dist/production/setup-cli.js",
+    "verify": "pnpm check && pnpm build && pnpm test"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "2.0.0",
