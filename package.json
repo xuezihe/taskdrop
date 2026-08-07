@@ -9,9 +9,10 @@
     "pnpm": ">=10.13 <11"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && cp -r src/production/migrations dist/production/migrations",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:db": "vitest run --config vitest.db.config.ts",
     "test:watch": "vitest",
     "prototype:p1": "pnpm build && node dist/prototypes/p1-codex-mcp-smoke/server.js",
     "prototype:p2": "pnpm build && node dist/prototypes/p2-minimum-handoff/server.js",
@@ -20,6 +21,7 @@
     "prototype:p6": "pnpm build && node dist/prototypes/p6-dual-era-contract/runner.js",
     "prototype:setup-cli": "pnpm build && node dist/prototypes/p7-space-key-cli/cli.js",
     "setup:cli": "pnpm build && node dist/production/setup-cli.js",
+    "migrate": "pnpm build && node dist/production/migrate.js",
     "verify": "pnpm check && pnpm build && pnpm test"
   },
   "dependencies": {
