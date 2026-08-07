@@ -1,11 +1,11 @@
 import { randomBytes } from "node:crypto";
 
-import type { Pool, PoolClient } from "./db.js";
+import type { Pool } from "./db.js";
 import { withTransaction } from "./db.js";
 
-// Excludes I, L, O so generated codes survive the input normalization
+// Crockford Base32 excludes I, L, O, U so generated codes survive input normalization.
 // O -> 0, I -> 1, L -> 1 defined by the Tool Contract.
-const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ0123456789";
+const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const CODE_LENGTH = 6;
 const CODE_COLLISION_RETRIES = 5;
 
@@ -64,11 +64,13 @@ interface HandoffRow {
   expires_at: Date;
 }
 
+type RevisionSnapshotRow = HandoffRow & RevisionRow;
+
 function generateCode(): string {
   const bytes = randomBytes(CODE_LENGTH);
   let out = "";
   for (let i = 0; i < CODE_LENGTH; i++) {
-    out += CODE_ALPHABET[bytes[i]! % CODE_ALPHABET.length]!;
+    out += CODE_ALPHABET[bytes[i]! & 31]!;
   }
   return out;
 }
@@ -89,35 +91,6 @@ function toSnapshot(
     createdAt: revision.created_at.toISOString(),
     expiresAt: handoff.expires_at.toISOString(),
   };
-}
-
-async function readRevision(
-  client: PoolClient,
-  spaceId: Uint8Array,
-  code: string,
-  revision: number,
-): Promise<RevisionRow | null> {
-  const result = await client.query<RevisionRow>(
-    `SELECT revision, markdown, redaction_count, created_at
-     FROM revisions
-     WHERE space_id = $1 AND handoff_code = $2 AND revision = $3`,
-    [spaceId, code, revision],
-  );
-  return result.rows[0] ?? null;
-}
-
-async function readHandoff(
-  client: PoolClient,
-  spaceId: Uint8Array,
-  code: string,
-): Promise<HandoffRow | null> {
-  const result = await client.query<HandoffRow>(
-    `SELECT code, latest_revision, expires_at
-     FROM handoffs
-     WHERE space_id = $1 AND code = $2 AND expires_at > now()`,
-    [spaceId, code],
-  );
-  return result.rows[0] ?? null;
 }
 
 export function createHandoffStore(pool: Pool, retentionWindowMs: number): HandoffStore {
@@ -163,30 +136,26 @@ export function createHandoffStore(pool: Pool, retentionWindowMs: number): Hando
     },
 
     async getHandoff({ spaceId, code, revision }): Promise<HandoffStoreResult> {
-      const client = await pool.connect();
-      try {
-        const handoff = await readHandoff(client, spaceId, code);
-        if (!handoff) {
-          return {
-            ok: false,
-            error: { code: "HANDOFF_NOT_FOUND", handoffCode: code },
-          };
-        }
-
-        const targetRevision =
-          revision === "latest" ? handoff.latest_revision : revision;
-
-        const revisionRow = await readRevision(client, spaceId, code, targetRevision);
-        if (!revisionRow) {
-          return {
-            ok: false,
-            error: { code: "HANDOFF_NOT_FOUND", handoffCode: code },
-          };
-        }
-        return toSnapshot(handoff, revisionRow);
-      } finally {
-        client.release();
+      const targetRevision = revision === "latest" ? null : revision;
+      const result = await pool.query<RevisionSnapshotRow>(
+        `SELECT h.code, h.latest_revision, h.expires_at,
+                r.revision, r.markdown, r.redaction_count, r.created_at
+         FROM handoffs h
+         JOIN revisions r
+           ON r.space_id = h.space_id
+          AND r.handoff_code = h.code
+          AND r.revision = COALESCE($3::smallint, h.latest_revision)
+         WHERE h.space_id = $1 AND h.code = $2 AND h.expires_at > now()`,
+        [spaceId, code, targetRevision],
+      );
+      const row = result.rows[0];
+      if (!row) {
+        return {
+          ok: false,
+          error: { code: "HANDOFF_NOT_FOUND", handoffCode: code },
+        };
       }
+      return toSnapshot(row, row);
     },
 
     async appendRevision({ spaceId, code, baseRevision, markdown, redactionCount }): Promise<HandoffStoreResult> {

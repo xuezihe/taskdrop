@@ -21,7 +21,7 @@ function assertSnapshot(r: unknown): asserts r is RevisionSnapshot {
   expect(isSnapshot(r)).toBe(true);
 }
 
-const CODE_PATTERN = /^[A-Z0-9]{6}$/;
+const CODE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{6}$/;
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
 
 describe.skipIf(skip)("HandoffStore revision loop", () => {
