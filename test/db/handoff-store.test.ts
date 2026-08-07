@@ -6,7 +6,9 @@ import { createPool, type Pool } from "../../src/production/db.js";
 import {
   createHandoffStore,
   type HandoffStore,
+  type HandoffStoreResult,
   type RevisionSnapshot,
+  type SpaceQuotaLimits,
 } from "../../src/production/handoff-store.js";
 
 const DATABASE_URL = process.env["DATABASE_URL"];
@@ -516,4 +518,121 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
       }
     }
   }, 15_000);
+});
+
+describe.skipIf(skip)("HandoffStore best-effort Space quota", () => {
+  let pool: Pool;
+
+  beforeAll(async () => {
+    pool = createPool(DATABASE_URL!);
+  });
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  it("createHandoff rejects with SPACE_QUOTA_EXCEEDED (handoffs) when live Handoff count reaches limit", async () => {
+    const spaceId = randomBytes(32);
+    const limits: SpaceQuotaLimits = { maxLiveHandoffs: 2, maxRetainedMarkdownBytes: 64 * 1024 * 1024 };
+    const store = createHandoffStore(pool, RETENTION_WINDOW_MS, limits);
+
+    const r1 = await store.createHandoff({ spaceId, markdown: "quota-h1", redactionCount: 0 });
+    assertSnapshot(r1);
+    const r2 = await store.createHandoff({ spaceId, markdown: "quota-h2", redactionCount: 0 });
+    assertSnapshot(r2);
+
+    const r3 = await store.createHandoff({ spaceId, markdown: "quota-h3", redactionCount: 0 });
+    expect(r3).toEqual({
+      ok: false,
+      error: { code: "SPACE_QUOTA_EXCEEDED", quota: "handoffs" },
+    });
+
+    const handoffCount = await pool.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM handoffs WHERE space_id = $1",
+      [spaceId],
+    );
+    expect(handoffCount.rows[0]!.n).toBe(2);
+
+    const revisionCount = await pool.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM revisions WHERE space_id = $1",
+      [spaceId],
+    );
+    expect(revisionCount.rows[0]!.n).toBe(2);
+  });
+
+  it("appendRevision rejects with SPACE_QUOTA_EXCEEDED (retainedMarkdown) when retained Markdown reaches limit, with no mutation", async () => {
+    const spaceId = randomBytes(32);
+    const limits: SpaceQuotaLimits = { maxLiveHandoffs: 32, maxRetainedMarkdownBytes: 100 };
+    const store = createHandoffStore(pool, RETENTION_WINDOW_MS, limits);
+
+    const created = await store.createHandoff({ spaceId, markdown: "A".repeat(60), redactionCount: 0 });
+    assertSnapshot(created);
+
+    const appended = await store.appendRevision({
+      spaceId,
+      code: created.code,
+      baseRevision: 1,
+      markdown: "B".repeat(50),
+      redactionCount: 0,
+    });
+    assertSnapshot(appended);
+    expect(appended.revision).toBe(2);
+
+    const expiryBefore = await pool.query<{ expires_at: Date }>(
+      "SELECT expires_at FROM handoffs WHERE space_id = $1 AND code = $2",
+      [spaceId, created.code],
+    );
+    const expiresAtBefore = expiryBefore.rows[0]!.expires_at;
+
+    const rejected = await store.appendRevision({
+      spaceId,
+      code: created.code,
+      baseRevision: 2,
+      markdown: "C".repeat(40),
+      redactionCount: 0,
+    });
+    expect(rejected).toEqual({
+      ok: false,
+      error: { code: "SPACE_QUOTA_EXCEEDED", quota: "retainedMarkdown" },
+    });
+
+    const revisionCount = await pool.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM revisions WHERE space_id = $1 AND handoff_code = $2",
+      [spaceId, created.code],
+    );
+    expect(revisionCount.rows[0]!.n).toBe(2);
+
+    const latestRow = await pool.query<{ latest_revision: number }>(
+      "SELECT latest_revision FROM handoffs WHERE space_id = $1 AND code = $2",
+      [spaceId, created.code],
+    );
+    expect(latestRow.rows[0]!.latest_revision).toBe(2);
+
+    const expiryAfter = await pool.query<{ expires_at: Date }>(
+      "SELECT expires_at FROM handoffs WHERE space_id = $1 AND code = $2",
+      [spaceId, created.code],
+    );
+    expect(expiryAfter.rows[0]!.expires_at).toEqual(expiresAtBefore);
+  });
+
+  it("logically expired Handoffs do not count toward quota", async () => {
+    const spaceId = randomBytes(32);
+    const limits: SpaceQuotaLimits = { maxLiveHandoffs: 2, maxRetainedMarkdownBytes: 64 * 1024 * 1024 };
+    const store = createHandoffStore(pool, RETENTION_WINDOW_MS, limits);
+
+    const r1 = await store.createHandoff({ spaceId, markdown: "expiry-quota-h1", redactionCount: 0 });
+    assertSnapshot(r1);
+    const r2 = await store.createHandoff({ spaceId, markdown: "expiry-quota-h2", redactionCount: 0 });
+    assertSnapshot(r2);
+
+    await pool.query(
+      "UPDATE handoffs SET expires_at = now() - interval '1 second' WHERE space_id = $1",
+      [spaceId],
+    );
+
+    const r3 = await store.createHandoff({ spaceId, markdown: "expiry-quota-h3", redactionCount: 0 });
+    expect(isSnapshot(r3)).toBe(true);
+    assertSnapshot(r3);
+    expect(r3.revision).toBe(1);
+  });
 });

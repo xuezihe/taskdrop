@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import type { Pool } from "./db.js";
+import type { Pool, PoolClient } from "./db.js";
 import { withTransaction } from "./db.js";
 
 // Crockford Base32 excludes I, L, O, U so generated codes survive input normalization.
@@ -8,6 +8,16 @@ import { withTransaction } from "./db.js";
 const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const CODE_LENGTH = 6;
 const CODE_COLLISION_RETRIES = 5;
+
+export interface SpaceQuotaLimits {
+  maxLiveHandoffs: number;
+  maxRetainedMarkdownBytes: number;
+}
+
+const DEFAULT_SPACE_QUOTA: SpaceQuotaLimits = {
+  maxLiveHandoffs: 32,
+  maxRetainedMarkdownBytes: 64 * 1024 * 1024,
+};
 
 export interface RevisionSnapshot {
   ok: true;
@@ -27,7 +37,8 @@ export type HandoffStoreError =
   | {
       ok: false;
       error: { code: "REVISION_CONFLICT"; expectedRevision: number; receivedBaseRevision: number };
-    };
+    }
+  | { ok: false; error: { code: "SPACE_QUOTA_EXCEEDED"; quota: "handoffs" | "retainedMarkdown" } };
 
 export type HandoffStoreResult = RevisionSnapshot | HandoffStoreError;
 
@@ -36,7 +47,7 @@ export interface HandoffStore {
     spaceId: Uint8Array;
     markdown: string;
     redactionCount: number;
-  }): Promise<RevisionSnapshot>;
+  }): Promise<HandoffStoreResult>;
   getHandoff(input: {
     spaceId: Uint8Array;
     code: string;
@@ -93,14 +104,56 @@ function toSnapshot(
   };
 }
 
-export function createHandoffStore(pool: Pool, retentionWindowMs: number): HandoffStore {
+// Best-effort Space quota check. Rejects when the current observed state has
+// already reached the limit. Concurrent writes to different Handoffs may both
+// observe the same pre-write total and temporarily overshoot; this race is
+// accepted for the Beta rather than adding a coordination row.
+async function checkSpaceQuota(
+  client: PoolClient,
+  spaceId: Uint8Array,
+  limits: SpaceQuotaLimits,
+  checkHandoffCount: boolean,
+): Promise<HandoffStoreError | null> {
+  if (checkHandoffCount) {
+    const handoffCount = await client.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM handoffs WHERE space_id = $1 AND expires_at > now()",
+      [spaceId],
+    );
+    if (handoffCount.rows[0]!.n >= limits.maxLiveHandoffs) {
+      return { ok: false, error: { code: "SPACE_QUOTA_EXCEEDED", quota: "handoffs" } };
+    }
+  }
+
+  const markdownTotal = await client.query<{ total: number }>(
+    `SELECT COALESCE(sum(octet_length(r.markdown)), 0)::bigint AS total
+     FROM revisions r
+     JOIN handoffs h
+       ON h.space_id = r.space_id AND h.code = r.handoff_code
+     WHERE r.space_id = $1 AND h.expires_at > now()`,
+    [spaceId],
+  );
+  if (Number(markdownTotal.rows[0]!.total) >= limits.maxRetainedMarkdownBytes) {
+    return { ok: false, error: { code: "SPACE_QUOTA_EXCEEDED", quota: "retainedMarkdown" } };
+  }
+
+  return null;
+}
+
+export function createHandoffStore(
+  pool: Pool,
+  retentionWindowMs: number,
+  quota: SpaceQuotaLimits = DEFAULT_SPACE_QUOTA,
+): HandoffStore {
   return {
-    async createHandoff({ spaceId, markdown, redactionCount }): Promise<RevisionSnapshot> {
+    async createHandoff({ spaceId, markdown, redactionCount }): Promise<HandoffStoreResult> {
       let lastError: unknown;
       for (let attempt = 0; attempt < CODE_COLLISION_RETRIES; attempt++) {
         const code = generateCode();
         try {
           return await withTransaction(pool, async (client) => {
+            const quotaError = await checkSpaceQuota(client, spaceId, quota, true);
+            if (quotaError) return quotaError;
+
             const now = await client.query<{ created_at: Date }>(
               "SELECT now() AS created_at",
             );
@@ -185,6 +238,9 @@ export function createHandoffStore(pool: Pool, retentionWindowMs: number): Hando
             },
           };
         }
+
+        const quotaError = await checkSpaceQuota(client, spaceId, quota, false);
+        if (quotaError) return quotaError;
 
         const now = await client.query<{ created_at: Date }>(
           "SELECT now() AS created_at",
