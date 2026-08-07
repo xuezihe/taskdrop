@@ -41,13 +41,18 @@ export type HandoffStoreError =
   | { ok: false; error: { code: "SPACE_QUOTA_EXCEEDED"; quota: "handoffs" | "retainedMarkdown" } };
 
 export type HandoffStoreResult = RevisionSnapshot | HandoffStoreError;
+export type SpaceQuotaExceeded = Extract<
+  HandoffStoreError,
+  { error: { code: "SPACE_QUOTA_EXCEEDED" } }
+>;
+export type CreateHandoffStoreResult = RevisionSnapshot | SpaceQuotaExceeded;
 
 export interface HandoffStore {
   createHandoff(input: {
     spaceId: Uint8Array;
     markdown: string;
     redactionCount: number;
-  }): Promise<HandoffStoreResult>;
+  }): Promise<CreateHandoffStoreResult>;
   getHandoff(input: {
     spaceId: Uint8Array;
     code: string;
@@ -113,7 +118,7 @@ async function checkSpaceQuota(
   spaceId: Uint8Array,
   limits: SpaceQuotaLimits,
   checkHandoffCount: boolean,
-): Promise<HandoffStoreError | null> {
+): Promise<SpaceQuotaExceeded | null> {
   if (checkHandoffCount) {
     const handoffCount = await client.query<{ n: number }>(
       "SELECT count(*)::int AS n FROM handoffs WHERE space_id = $1 AND expires_at > now()",
@@ -145,7 +150,7 @@ export function createHandoffStore(
   quota: SpaceQuotaLimits = DEFAULT_SPACE_QUOTA,
 ): HandoffStore {
   return {
-    async createHandoff({ spaceId, markdown, redactionCount }): Promise<HandoffStoreResult> {
+    async createHandoff({ spaceId, markdown, redactionCount }): Promise<CreateHandoffStoreResult> {
       let lastError: unknown;
       for (let attempt = 0; attempt < CODE_COLLISION_RETRIES; attempt++) {
         const code = generateCode();

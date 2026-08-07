@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   createMcpHttpAuthenticationHandler,
   type AuthenticatedSpace,
+  type SanitizedMcpRequest,
 } from "../src/production/mcp-http-auth.js";
 import { formatSpaceKey } from "../src/production/space-identity.js";
 
@@ -18,12 +19,25 @@ function toHex(bytes: Uint8Array): string {
 }
 
 async function withAuthenticatedServer(
-  run: (endpoint: string, dispatched: AuthenticatedSpace[]) => Promise<void>,
+  run: (
+    endpoint: string,
+    dispatched: AuthenticatedSpace[],
+    requests: SanitizedMcpRequest[],
+    bodies: string[],
+  ) => Promise<void>,
 ): Promise<void> {
   const dispatched: AuthenticatedSpace[] = [];
+  const requests: SanitizedMcpRequest[] = [];
+  const bodies: string[] = [];
   const server = createServer(
-    createMcpHttpAuthenticationHandler(async (authentication, response) => {
+    createMcpHttpAuthenticationHandler(async (authentication, request, response) => {
       dispatched.push(authentication);
+      requests.push(request);
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
+      }
+      bodies.push(Buffer.concat(chunks).toString("utf8"));
       response.writeHead(204);
       response.end();
     }),
@@ -44,7 +58,7 @@ async function withAuthenticatedServer(
   }
 
   try {
-    await run(`http://127.0.0.1:${address.port}`, dispatched);
+    await run(`http://127.0.0.1:${address.port}`, dispatched, requests, bodies);
   } finally {
     await closeServer(server);
   }
@@ -58,7 +72,7 @@ function closeServer(server: Server): Promise<void> {
 
 describe("MCP HTTP authentication boundary", () => {
   it("accepts the carrier matrix and rejects missing, malformed, conflicting, and non-canonical credentials before dispatch", async () => {
-    await withAuthenticatedServer(async (endpoint, dispatched) => {
+    await withAuthenticatedServer(async (endpoint, dispatched, requests) => {
       const successfulCarriers = [
         {
           url: `${endpoint}/mcp`,
@@ -93,6 +107,12 @@ describe("MCP HTTP authentication boundary", () => {
         ZERO_SPACE_FINGERPRINT,
         ZERO_SPACE_FINGERPRINT,
       ]);
+      expect(requests.map(({ url }) => url)).toEqual(["/mcp", "/mcp", "/mcp"]);
+      expect(requests.map(({ headers }) => headers.authorization)).toEqual([
+        undefined,
+        undefined,
+        undefined,
+      ]);
 
       const rejectedRequests = [
         { url: `${endpoint}/mcp`, init: {} },
@@ -123,8 +143,13 @@ describe("MCP HTTP authentication boundary", () => {
   });
 
   it("reads query credentials only at the exact endpoint, never redirects, and passes no raw key downstream", async () => {
-    await withAuthenticatedServer(async (endpoint, dispatched) => {
-      const exactEndpoint = await fetch(`${endpoint}/mcp?taskdropKey=${SPACE_KEY}`);
+    await withAuthenticatedServer(async (endpoint, dispatched, requests, bodies) => {
+      const body = JSON.stringify({ jsonrpc: "2.0", method: "tools/call", id: 1 });
+      const exactEndpoint = await fetch(`${endpoint}/mcp?taskdropKey=${SPACE_KEY}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body,
+      });
       const trailingSlash = await fetch(`${endpoint}/mcp/?taskdropKey=${SPACE_KEY}`);
       const otherPath = await fetch(`${endpoint}/other?taskdropKey=${SPACE_KEY}`);
 
@@ -145,6 +170,10 @@ describe("MCP HTTP authentication boundary", () => {
       expect(authenticatedSpace.carrier).toBe("query");
       expect(toHex(authenticatedSpace.spaceId)).toBe(ZERO_SPACE_ID);
       expect(authenticatedSpace.spaceFingerprint).toBe(ZERO_SPACE_FINGERPRINT);
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.url).toBe("/mcp");
+      expect(requests[0]?.headers.authorization).toBeUndefined();
+      expect(bodies).toEqual([body]);
     });
   });
 });

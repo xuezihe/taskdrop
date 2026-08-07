@@ -1,7 +1,11 @@
 import http, { type Server } from "node:http";
-import pg from "pg";
 
 import type { ProductionConfig } from "./config.js";
+import { createPool } from "./db.js";
+import { createHandoffApplication } from "./handoff-application.js";
+import { createHandoffStore } from "./handoff-store.js";
+import { createMcpEndpoint } from "./mcp-endpoint.js";
+import { createMcpHttpAuthenticationHandler } from "./mcp-http-auth.js";
 
 export interface RunningServer {
   readonly port: number;
@@ -15,11 +19,14 @@ const HEALTH_OK_BODY = JSON.stringify({ status: "ok" });
 const HEALTH_UNAVAILABLE_BODY = JSON.stringify({ status: "unavailable" });
 
 export async function startProduction(config: ProductionConfig): Promise<RunningServer> {
-  const pool = new pg.Pool({
-    connectionString: config.databaseUrl,
-    max: 10,
-    idleTimeoutMillis: 30_000,
-  });
+  const pool = createPool(config.databaseUrl);
+  const store = createHandoffStore(pool, config.retentionWindowMs);
+  const application = createHandoffApplication(store);
+  const mcpEndpoint = createMcpEndpoint(application);
+  const authenticateMcp = createMcpHttpAuthenticationHandler(
+    (authentication, request, response) =>
+      mcpEndpoint.dispatch(authentication, request, response),
+  );
 
   let shuttingDown = false;
 
@@ -42,8 +49,7 @@ export async function startProduction(config: ProductionConfig): Promise<Running
 
   const server = http.createServer((req, res) => {
     if (req.url !== "/health" || req.method !== "GET") {
-      res.writeHead(404, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "not_found" }));
+      void authenticateMcp(req, res);
       return;
     }
     if (shuttingDown) {
@@ -83,6 +89,7 @@ export async function startProduction(config: ProductionConfig): Promise<Running
           resolve();
         });
       });
+      await mcpEndpoint.close();
       await pool.end();
     })();
     return shutdownPromise;

@@ -1,4 +1,9 @@
-import type { RequestListener, ServerResponse } from "node:http";
+import type {
+  IncomingHttpHeaders,
+  IncomingMessage,
+  RequestListener,
+  ServerResponse,
+} from "node:http";
 
 import {
   authenticateMcpCredential,
@@ -7,8 +12,15 @@ import {
 
 export type { AuthenticatedSpace } from "./credential.js";
 
+export interface SanitizedMcpRequest extends AsyncIterable<unknown> {
+  readonly method?: string;
+  readonly url: "/mcp";
+  readonly headers: IncomingHttpHeaders;
+}
+
 export type AuthenticatedMcpDispatch = (
   authentication: AuthenticatedSpace,
+  request: SanitizedMcpRequest,
   response: ServerResponse,
 ) => Promise<void> | void;
 
@@ -28,7 +40,35 @@ export function createMcpHttpAuthenticationHandler(
       sendJson(response, 401, UNAUTHORIZED_BODY);
       return;
     }
-    await dispatch(outcome.authentication, response);
+    await dispatch(outcome.authentication, sanitizeMcpRequest(request), response);
+  };
+}
+
+const MCP_HEADER_ALLOWLIST = [
+  "host",
+  "content-type",
+  "content-length",
+  "accept",
+  "mcp-protocol-version",
+  "mcp-method",
+  "mcp-session-id",
+  "last-event-id",
+] as const;
+
+function sanitizeMcpRequest(request: IncomingMessage): SanitizedMcpRequest {
+  const headers: Record<string, string | string[] | undefined> = {};
+  for (const name of MCP_HEADER_ALLOWLIST) {
+    const value = request.headers[name];
+    if (value !== undefined) headers[name] = value;
+  }
+
+  return {
+    ...(request.method === undefined ? {} : { method: request.method }),
+    url: "/mcp",
+    headers,
+    [Symbol.asyncIterator](): AsyncIterator<unknown> {
+      return request[Symbol.asyncIterator]();
+    },
   };
 }
 
