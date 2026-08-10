@@ -235,22 +235,28 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
       });
       expect(latestAfterSecondAppend.structuredContent).toEqual(thirdRevisionSnapshot);
 
-      const persistedAppend = await pool.query<PersistedRevision>(
+      const persistedRedactedRevisions = await pool.query<PersistedRevision>(
         `SELECT revision, markdown, redaction_count
          FROM revisions
-         WHERE space_id = $1 AND handoff_code = $2 AND revision = 2`,
+         WHERE space_id = $1 AND handoff_code = $2 AND revision IN (1, 2)
+         ORDER BY revision`,
         [spaceId, code],
       );
 
-      expect(persistedAppend.rows).toEqual([
+      expect(persistedRedactedRevisions.rows).toEqual([
+        {
+          revision: 1,
+          markdown: sanitizedMarkdown,
+          redaction_count: 2,
+        },
         {
           revision: 2,
           markdown: sanitizedAppendedMarkdown,
           redaction_count: 2,
         },
       ]);
-      expect(JSON.stringify(persistedAppend.rows)).not.toContain(spaceKey);
-      expect(JSON.stringify(persistedAppend.rows)).not.toContain(otherSpaceKey);
+      expect(JSON.stringify(persistedRedactedRevisions.rows)).not.toContain(spaceKey);
+      expect(JSON.stringify(persistedRedactedRevisions.rows)).not.toContain(otherSpaceKey);
 
       const stateBeforeConflict = await pool.query<PersistedHandoffState>(
         `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
