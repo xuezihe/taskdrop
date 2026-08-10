@@ -81,7 +81,13 @@ function createRequestProtocolServer(
             code,
           })
         : notImplemented(),
-    appendRevision: notImplemented,
+    appendRevision: ({ code, baseRevision, markdown }) =>
+      application.appendRevision({
+        spaceId: authentication.spaceId,
+        code,
+        baseRevision,
+        markdown,
+      }),
   };
   return createProtocolServer(handlers);
 }

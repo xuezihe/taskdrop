@@ -24,6 +24,12 @@ type PersistedRevision = {
   revision: number;
 };
 
+type PersistedHandoffState = {
+  expires_at: Date;
+  latest_revision: number;
+  revision_count: number;
+};
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Expected a structured MCP result");
@@ -51,7 +57,7 @@ async function reservePort(): Promise<number> {
   return address.port;
 }
 
-describe.skipIf(skip)("Production create/get endpoint", () => {
+describe.skipIf(skip)("Production handoff-loop endpoint", () => {
   let pool: Pool;
 
   beforeAll(() => {
@@ -62,7 +68,7 @@ describe.skipIf(skip)("Production create/get endpoint", () => {
     await pool.end();
   });
 
-  it("creates with Bearer and reads latest with Query after an Application restart", async () => {
+  it("repeats the create/get/append loop through MCP and rejects a stale append atomically", async () => {
     const port = await reservePort();
     const restartedPort = await reservePort();
     const spaceKey = formatSpaceKey(randomBytes(32));
@@ -86,6 +92,19 @@ describe.skipIf(skip)("Production create/get endpoint", () => {
       `Authenticating Key: ${REDACTED_SPACE_KEY_PLACEHOLDER}`,
       `Another Key: ${REDACTED_SPACE_KEY_PLACEHOLDER}`,
     ].join("\n");
+    const appendedMarkdown = [
+      "# Second production revision",
+      "",
+      `Authenticating Key: ${spaceKey}`,
+      `Another Key: ${otherSpaceKey}`,
+    ].join("\n");
+    const sanitizedAppendedMarkdown = [
+      "# Second production revision",
+      "",
+      `Authenticating Key: ${REDACTED_SPACE_KEY_PLACEHOLDER}`,
+      `Another Key: ${REDACTED_SPACE_KEY_PLACEHOLDER}`,
+    ].join("\n");
+    const thirdRevisionMarkdown = "# Third production revision\n\nready for another client";
 
     let running: RunningServer | undefined;
     let restarted: RunningServer | undefined;
@@ -150,22 +169,132 @@ describe.skipIf(skip)("Production create/get endpoint", () => {
 
       expect(read.structuredContent).toEqual(createdSnapshot);
 
-      const persisted = await pool.query<PersistedRevision>(
+      const appended = await client.callTool({
+        name: "append_revision",
+        arguments: {
+          code,
+          baseRevision: 1,
+          markdown: appendedMarkdown,
+        },
+      });
+      const appendedSnapshot = asRecord(appended.structuredContent);
+      expect(appendedSnapshot).toMatchObject({
+        ok: true,
+        code,
+        revision: 2,
+        latestRevision: 2,
+        isLatest: true,
+        markdown: sanitizedAppendedMarkdown,
+        contentSanitized: true,
+        redactionCount: 2,
+        createdAt: expect.any(String),
+        expiresAt: expect.any(String),
+      });
+      expect(
+        Date.parse(String(appendedSnapshot.expiresAt)) -
+          Date.parse(String(appendedSnapshot.createdAt)),
+      ).toBe(RETENTION_WINDOW_MS);
+      expect(JSON.stringify(appended)).not.toContain(spaceKey);
+      expect(JSON.stringify(appended)).not.toContain(otherSpaceKey);
+
+      const latestAfterAppend = await client.callTool({
+        name: "get_handoff",
+        arguments: { code },
+      });
+      expect(latestAfterAppend.structuredContent).toEqual(appendedSnapshot);
+
+      const appendedAgain = await client.callTool({
+        name: "append_revision",
+        arguments: {
+          code,
+          baseRevision: 2,
+          markdown: thirdRevisionMarkdown,
+        },
+      });
+      const thirdRevisionSnapshot = asRecord(appendedAgain.structuredContent);
+      expect(thirdRevisionSnapshot).toMatchObject({
+        ok: true,
+        code,
+        revision: 3,
+        latestRevision: 3,
+        isLatest: true,
+        markdown: thirdRevisionMarkdown,
+        contentSanitized: false,
+        redactionCount: 0,
+        createdAt: expect.any(String),
+        expiresAt: expect.any(String),
+      });
+      expect(
+        Date.parse(String(thirdRevisionSnapshot.expiresAt)) -
+          Date.parse(String(thirdRevisionSnapshot.createdAt)),
+      ).toBe(RETENTION_WINDOW_MS);
+
+      const latestAfterSecondAppend = await client.callTool({
+        name: "get_handoff",
+        arguments: { code },
+      });
+      expect(latestAfterSecondAppend.structuredContent).toEqual(thirdRevisionSnapshot);
+
+      const persistedAppend = await pool.query<PersistedRevision>(
         `SELECT revision, markdown, redaction_count
          FROM revisions
-         WHERE space_id = $1 AND handoff_code = $2 AND revision = 1`,
+         WHERE space_id = $1 AND handoff_code = $2 AND revision = 2`,
         [spaceId, code],
       );
 
-      expect(persisted.rows).toEqual([
+      expect(persistedAppend.rows).toEqual([
         {
-          revision: 1,
-          markdown: sanitizedMarkdown,
+          revision: 2,
+          markdown: sanitizedAppendedMarkdown,
           redaction_count: 2,
         },
       ]);
-      expect(JSON.stringify(persisted.rows)).not.toContain(spaceKey);
-      expect(JSON.stringify(persisted.rows)).not.toContain(otherSpaceKey);
+      expect(JSON.stringify(persistedAppend.rows)).not.toContain(spaceKey);
+      expect(JSON.stringify(persistedAppend.rows)).not.toContain(otherSpaceKey);
+
+      const stateBeforeConflict = await pool.query<PersistedHandoffState>(
+        `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
+         FROM handoffs h
+         JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
+         WHERE h.space_id = $1 AND h.code = $2
+         GROUP BY h.latest_revision, h.expires_at`,
+        [spaceId, code],
+      );
+      expect(stateBeforeConflict.rows).toHaveLength(1);
+
+      const stale = await client.callTool({
+        name: "append_revision",
+        arguments: {
+          code,
+          baseRevision: 2,
+          markdown: "# Stale revision\n\nthis must not be stored",
+        },
+      });
+      expect(stale.isError).toBe(true);
+      expect(stale.structuredContent).toEqual({
+        ok: false,
+        error: {
+          code: "REVISION_CONFLICT",
+          expectedRevision: 3,
+          receivedBaseRevision: 2,
+        },
+      });
+
+      const stateAfterConflict = await pool.query<PersistedHandoffState>(
+        `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
+         FROM handoffs h
+         JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
+         WHERE h.space_id = $1 AND h.code = $2
+         GROUP BY h.latest_revision, h.expires_at`,
+        [spaceId, code],
+      );
+      expect(stateAfterConflict.rows).toEqual(stateBeforeConflict.rows);
+
+      const latestAfterConflict = await client.callTool({
+        name: "get_handoff",
+        arguments: { code },
+      });
+      expect(latestAfterConflict.structuredContent).toEqual(thirdRevisionSnapshot);
     } finally {
       await client?.close().catch(() => undefined);
       await running?.shutdown().catch(() => undefined);
@@ -177,5 +306,5 @@ describe.skipIf(skip)("Production create/get endpoint", () => {
         ]);
       }
     }
-  }, 20_000);
+  }, 25_000);
 });
