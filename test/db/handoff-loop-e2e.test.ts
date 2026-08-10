@@ -132,6 +132,22 @@ async function readAddressedHandoffState(
   return result.rows;
 }
 
+async function readPersistedHandoffState(
+  pool: Pool,
+  spaceId: Uint8Array,
+  code: string,
+): Promise<PersistedHandoffState[]> {
+  const result = await pool.query<PersistedHandoffState>(
+    `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
+     FROM handoffs h
+     JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
+     WHERE h.space_id = $1 AND h.code = $2
+     GROUP BY h.latest_revision, h.expires_at`,
+    [spaceId, code],
+  );
+  return result.rows;
+}
+
 describe.skipIf(skip)("Production handoff-loop endpoint", () => {
   let pool: Pool;
 
@@ -324,15 +340,8 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
       ]);
       expectNoRawSpaceKeys(persistedRedactedRevisions.rows, [spaceKey, otherSpaceKey]);
 
-      const stateBeforeReads = await pool.query<PersistedHandoffState>(
-        `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
-         FROM handoffs h
-         JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
-         WHERE h.space_id = $1 AND h.code = $2
-         GROUP BY h.latest_revision, h.expires_at`,
-        [spaceId, code],
-      );
-      expect(stateBeforeReads.rows).toHaveLength(1);
+      const stateBeforeReads = await readPersistedHandoffState(pool, spaceId, code);
+      expect(stateBeforeReads).toHaveLength(1);
 
       const historical = await client.callTool({
         name: "get_handoff",
@@ -347,7 +356,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
 
       const absentRevision = await client.callTool({
         name: "get_handoff",
-        arguments: { code, revision: 4 },
+        arguments: { code, revision: 32_768 },
       });
       expect(absentRevision.isError).toBe(true);
       expect(absentRevision.structuredContent).toEqual({
@@ -355,15 +364,8 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         error: { code: "HANDOFF_NOT_FOUND", handoffCode: code },
       });
 
-      const stateAfterReads = await pool.query<PersistedHandoffState>(
-        `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
-         FROM handoffs h
-         JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
-         WHERE h.space_id = $1 AND h.code = $2
-         GROUP BY h.latest_revision, h.expires_at`,
-        [spaceId, code],
-      );
-      expect(stateAfterReads.rows).toEqual(stateBeforeReads.rows);
+      const stateAfterReads = await readPersistedHandoffState(pool, spaceId, code);
+      expect(stateAfterReads).toEqual(stateBeforeReads);
 
       const stale = await client.callTool({
         name: "append_revision",
@@ -383,15 +385,8 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         },
       });
 
-      const stateAfterConflict = await pool.query<PersistedHandoffState>(
-        `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
-         FROM handoffs h
-         JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
-         WHERE h.space_id = $1 AND h.code = $2
-         GROUP BY h.latest_revision, h.expires_at`,
-        [spaceId, code],
-      );
-      expect(stateAfterConflict.rows).toEqual(stateBeforeReads.rows);
+      const stateAfterConflict = await readPersistedHandoffState(pool, spaceId, code);
+      expect(stateAfterConflict).toEqual(stateBeforeReads);
 
       const latestAfterConflict = await client.callTool({
         name: "get_handoff",
@@ -480,13 +475,10 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         { markdown: exactLimitMarkdown, markdown_bytes: 262_144 },
       ]);
 
-      const stateBeforeRejectedAppend = await pool.query<PersistedHandoffState>(
-        `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
-         FROM handoffs h
-         JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
-         WHERE h.space_id = $1 AND h.code = $2
-         GROUP BY h.latest_revision, h.expires_at`,
-        [spaceId, code],
+      const stateBeforeRejectedAppend = await readPersistedHandoffState(
+        pool,
+        spaceId,
+        code,
       );
 
       const oversizedAppend = await client.callTool({
@@ -503,15 +495,12 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         error: { code: "CONTENT_TOO_LARGE", limitBytes: 262_144 },
       });
 
-      const stateAfterRejectedAppend = await pool.query<PersistedHandoffState>(
-        `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
-         FROM handoffs h
-         JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
-         WHERE h.space_id = $1 AND h.code = $2
-         GROUP BY h.latest_revision, h.expires_at`,
-        [spaceId, code],
+      const stateAfterRejectedAppend = await readPersistedHandoffState(
+        pool,
+        spaceId,
+        code,
       );
-      expect(stateAfterRejectedAppend.rows).toEqual(stateBeforeRejectedAppend.rows);
+      expect(stateAfterRejectedAppend).toEqual(stateBeforeRejectedAppend);
     } finally {
       await client?.close().catch(() => undefined);
       await running?.shutdown().catch(() => undefined);
@@ -563,15 +552,8 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         [spaceId, code],
       );
 
-      const stateBeforeLimit = await pool.query<PersistedHandoffState>(
-        `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
-         FROM handoffs h
-         JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
-         WHERE h.space_id = $1 AND h.code = $2
-         GROUP BY h.latest_revision, h.expires_at`,
-        [spaceId, code],
-      );
-      expect(stateBeforeLimit.rows).toMatchObject([
+      const stateBeforeLimit = await readPersistedHandoffState(pool, spaceId, code);
+      expect(stateBeforeLimit).toMatchObject([
         { latest_revision: 25, revision_count: 25 },
       ]);
 
@@ -589,15 +571,8 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         error: { code: "REVISION_LIMIT_REACHED", limit: 25 },
       });
 
-      const stateAfterLimit = await pool.query<PersistedHandoffState>(
-        `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
-         FROM handoffs h
-         JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
-         WHERE h.space_id = $1 AND h.code = $2
-         GROUP BY h.latest_revision, h.expires_at`,
-        [spaceId, code],
-      );
-      expect(stateAfterLimit.rows).toEqual(stateBeforeLimit.rows);
+      const stateAfterLimit = await readPersistedHandoffState(pool, spaceId, code);
+      expect(stateAfterLimit).toEqual(stateBeforeLimit);
     } finally {
       await client?.close().catch(() => undefined);
       await running?.shutdown().catch(() => undefined);

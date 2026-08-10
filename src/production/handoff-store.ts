@@ -212,7 +212,7 @@ export function createHandoffStore(
          JOIN revisions r
            ON r.space_id = h.space_id
           AND r.handoff_code = h.code
-          AND r.revision = COALESCE($3::smallint, h.latest_revision)
+          AND r.revision = COALESCE($3::numeric, h.latest_revision)
          WHERE h.space_id = $1 AND h.code = $2 AND h.expires_at > now()`,
         [spaceId, code, targetRevision],
       );
