@@ -51,7 +51,7 @@ async function reservePort(): Promise<number> {
   return address.port;
 }
 
-describe.skipIf(skip)("Production create_handoff endpoint", () => {
+describe.skipIf(skip)("Production create/get endpoint", () => {
   let pool: Pool;
 
   beforeAll(() => {
@@ -62,8 +62,9 @@ describe.skipIf(skip)("Production create_handoff endpoint", () => {
     await pool.end();
   });
 
-  it("creates sanitized Revision 1 over HTTP and retains it across an Application restart", async () => {
+  it("creates with Bearer and reads latest with Query after an Application restart", async () => {
     const port = await reservePort();
+    const restartedPort = await reservePort();
     const spaceKey = formatSpaceKey(randomBytes(32));
     const otherSpaceKey = formatSpaceKey(randomBytes(32));
     const spaceId = Buffer.from(await deriveSpaceId(parseSpaceKey(spaceKey)));
@@ -90,6 +91,7 @@ describe.skipIf(skip)("Production create_handoff endpoint", () => {
     let restarted: RunningServer | undefined;
     let client: Client | undefined;
     let code: string | undefined;
+    let createdSnapshot: Record<string, unknown> | undefined;
 
     try {
       running = await startProduction(config);
@@ -105,6 +107,7 @@ describe.skipIf(skip)("Production create_handoff endpoint", () => {
         arguments: { markdown },
       });
       const snapshot = asRecord(result.structuredContent);
+      createdSnapshot = snapshot;
       code = String(snapshot.code);
 
       expect(snapshot).toMatchObject({
@@ -129,7 +132,24 @@ describe.skipIf(skip)("Production create_handoff endpoint", () => {
       await running.shutdown();
       running = undefined;
 
-      restarted = await startProduction(config);
+      restarted = await startProduction({ ...config, port: restartedPort });
+      if (!createdSnapshot || !code) {
+        throw new Error("Expected create_handoff to return a snapshot and Code");
+      }
+
+      client = new Client({ name: "taskdrop-get-e2e", version: "0.0.0" });
+      const queryTransport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${restartedPort}/mcp?taskdropKey=${spaceKey}`),
+      );
+      await client.connect(queryTransport);
+
+      const read = await client.callTool({
+        name: "get_handoff",
+        arguments: { code },
+      });
+
+      expect(read.structuredContent).toEqual(createdSnapshot);
+
       const persisted = await pool.query<PersistedRevision>(
         `SELECT revision, markdown, redaction_count
          FROM revisions

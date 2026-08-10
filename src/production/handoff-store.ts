@@ -45,7 +45,12 @@ export type SpaceQuotaExceeded = Extract<
   HandoffStoreError,
   { error: { code: "SPACE_QUOTA_EXCEEDED" } }
 >;
+export type HandoffNotFound = Extract<
+  HandoffStoreError,
+  { error: { code: "HANDOFF_NOT_FOUND" } }
+>;
 export type CreateHandoffStoreResult = RevisionSnapshot | SpaceQuotaExceeded;
+export type GetHandoffStoreResult = RevisionSnapshot | HandoffNotFound;
 
 export interface HandoffStore {
   createHandoff(input: {
@@ -57,7 +62,7 @@ export interface HandoffStore {
     spaceId: Uint8Array;
     code: string;
     revision: number | "latest";
-  }): Promise<HandoffStoreResult>;
+  }): Promise<GetHandoffStoreResult>;
   appendRevision(input: {
     spaceId: Uint8Array;
     code: string;
@@ -193,7 +198,7 @@ export function createHandoffStore(
       throw lastError;
     },
 
-    async getHandoff({ spaceId, code, revision }): Promise<HandoffStoreResult> {
+    async getHandoff({ spaceId, code, revision }): Promise<GetHandoffStoreResult> {
       const targetRevision = revision === "latest" ? null : revision;
       const result = await pool.query<RevisionSnapshotRow>(
         `SELECT h.code, h.latest_revision, h.expires_at,

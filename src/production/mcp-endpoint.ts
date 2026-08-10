@@ -74,7 +74,13 @@ function createRequestProtocolServer(
         spaceId: authentication.spaceId,
         markdown,
       }),
-    getHandoff: notImplemented,
+    getHandoff: ({ code, revision }) =>
+      revision === "latest"
+        ? application.getLatestHandoff({
+            spaceId: authentication.spaceId,
+            code,
+          })
+        : notImplemented(),
     appendRevision: notImplemented,
   };
   return createProtocolServer(handlers);

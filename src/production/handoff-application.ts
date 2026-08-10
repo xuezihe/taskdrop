@@ -1,5 +1,6 @@
 import type {
   CreateHandoffStoreResult,
+  GetHandoffStoreResult,
   HandoffStore,
 } from "./handoff-store.js";
 import { redactSpaceKeys } from "./redaction.js";
@@ -9,6 +10,10 @@ export interface HandoffApplication {
     spaceId: Uint8Array;
     markdown: string;
   }): Promise<CreateHandoffStoreResult>;
+  getLatestHandoff(input: {
+    spaceId: Uint8Array;
+    code: string;
+  }): Promise<GetHandoffStoreResult>;
 }
 
 export function createHandoffApplication(store: HandoffStore): HandoffApplication {
@@ -25,5 +30,7 @@ export function createHandoffApplication(store: HandoffStore): HandoffApplicatio
         redactionCount: redaction.redactionCount,
       });
     },
+    getLatestHandoff: ({ spaceId, code }) =>
+      store.getHandoff({ spaceId, code, revision: "latest" }),
   };
 }
