@@ -4,6 +4,8 @@ import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const productionRoot = join(import.meta.dirname, "..", "src", "production");
+const testRoot = join(import.meta.dirname);
+const prototypePathLiteral = /["'`][^"'`\r\n]*prototype[s]\/[^"'`\r\n]*["'`]/;
 
 function listTsFiles(dir: string): string[] {
   const out: string[] = [];
@@ -18,17 +20,20 @@ function listTsFiles(dir: string): string[] {
   return out;
 }
 
+function findPrototypePathUsers(root: string): string[] {
+  return listTsFiles(root)
+    .filter((file) => prototypePathLiteral.test(readFileSync(file, "utf8")))
+    .map((file) => relative(process.cwd(), file));
+}
+
 describe("production isolation", () => {
-  it("no production source imports from the prototype tree", () => {
+  it("no production source references the prototype runtime tree", () => {
     const files = listTsFiles(productionRoot);
     expect(files.length).toBeGreaterThan(0);
-    const offenders: string[] = [];
-    for (const file of files) {
-      const text = readFileSync(file, "utf8");
-      if (/(from\s+["'][^"']*prototypes\/|require\(["'][^"']*prototypes\/)/.test(text)) {
-        offenders.push(relative(process.cwd(), file));
-      }
-    }
-    expect(offenders).toEqual([]);
+    expect(findPrototypePathUsers(productionRoot)).toEqual([]);
+  });
+
+  it("no test source references the prototype runtime tree", () => {
+    expect(findPrototypePathUsers(testRoot)).toEqual([]);
   });
 });
