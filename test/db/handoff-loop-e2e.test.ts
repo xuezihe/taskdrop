@@ -298,7 +298,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
 
       const latestAfterSecondAppend = await client.callTool({
         name: "get_handoff",
-        arguments: { code },
+        arguments: { code, revision: "latest" },
       });
       expect(latestAfterSecondAppend.structuredContent).toEqual(thirdRevisionSnapshot);
 
@@ -324,7 +324,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
       ]);
       expectNoRawSpaceKeys(persistedRedactedRevisions.rows, [spaceKey, otherSpaceKey]);
 
-      const stateBeforeConflict = await pool.query<PersistedHandoffState>(
+      const stateBeforeReads = await pool.query<PersistedHandoffState>(
         `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
          FROM handoffs h
          JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
@@ -332,7 +332,38 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
          GROUP BY h.latest_revision, h.expires_at`,
         [spaceId, code],
       );
-      expect(stateBeforeConflict.rows).toHaveLength(1);
+      expect(stateBeforeReads.rows).toHaveLength(1);
+
+      const historical = await client.callTool({
+        name: "get_handoff",
+        arguments: { code, revision: 1 },
+      });
+      expect(historical.structuredContent).toEqual({
+        ...createdSnapshot,
+        latestRevision: 3,
+        isLatest: false,
+        expiresAt: thirdRevisionSnapshot.expiresAt,
+      });
+
+      const absentRevision = await client.callTool({
+        name: "get_handoff",
+        arguments: { code, revision: 4 },
+      });
+      expect(absentRevision.isError).toBe(true);
+      expect(absentRevision.structuredContent).toEqual({
+        ok: false,
+        error: { code: "HANDOFF_NOT_FOUND", handoffCode: code },
+      });
+
+      const stateAfterReads = await pool.query<PersistedHandoffState>(
+        `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
+         FROM handoffs h
+         JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
+         WHERE h.space_id = $1 AND h.code = $2
+         GROUP BY h.latest_revision, h.expires_at`,
+        [spaceId, code],
+      );
+      expect(stateAfterReads.rows).toEqual(stateBeforeReads.rows);
 
       const stale = await client.callTool({
         name: "append_revision",
@@ -360,7 +391,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
          GROUP BY h.latest_revision, h.expires_at`,
         [spaceId, code],
       );
-      expect(stateAfterConflict.rows).toEqual(stateBeforeConflict.rows);
+      expect(stateAfterConflict.rows).toEqual(stateBeforeReads.rows);
 
       const latestAfterConflict = await client.callTool({
         name: "get_handoff",

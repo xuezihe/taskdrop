@@ -23,9 +23,10 @@ export interface HandoffApplication {
     spaceId: Uint8Array;
     markdown: string;
   }): Promise<CreateHandoffApplicationResult>;
-  getLatestHandoff(input: {
+  getHandoff(input: {
     spaceId: Uint8Array;
     code: string;
+    revision: number | "latest";
   }): Promise<GetHandoffStoreResult>;
   appendRevision(input: {
     spaceId: Uint8Array;
@@ -49,11 +50,11 @@ export function createHandoffApplication(store: HandoffStore): HandoffApplicatio
         redactionCount: redaction.redactionCount,
       });
     },
-    getLatestHandoff: ({ spaceId, code }) =>
+    getHandoff: ({ spaceId, code, revision }) =>
       store.getHandoff({
         spaceId,
         code: normalizeHandoffCode(code),
-        revision: "latest",
+        revision,
       }),
     async appendRevision({
       spaceId,

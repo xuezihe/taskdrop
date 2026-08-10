@@ -65,9 +65,6 @@ function createRequestProtocolServer(
   application: HandoffApplication,
 ) {
   const authentication = readAuthenticatedSpace(context.authInfo);
-  const notImplemented = async (): Promise<never> => {
-    throw new Error("tool is not implemented in the current production slice");
-  };
   const handlers: ProtocolToolHandlers = {
     createHandoff: ({ markdown }) =>
       application.createHandoff({
@@ -75,12 +72,11 @@ function createRequestProtocolServer(
         markdown,
       }),
     getHandoff: ({ code, revision }) =>
-      revision === "latest"
-        ? application.getLatestHandoff({
-            spaceId: authentication.spaceId,
-            code,
-          })
-        : notImplemented(),
+      application.getHandoff({
+        spaceId: authentication.spaceId,
+        code,
+        revision,
+      }),
     appendRevision: ({ code, baseRevision, markdown }) =>
       application.appendRevision({
         spaceId: authentication.spaceId,
