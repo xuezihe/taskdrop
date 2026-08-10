@@ -140,7 +140,7 @@ describe("Production MCP protocol adapter", () => {
       expect(byName.get("get_handoff")).toMatchObject({
         inputSchema: {
           properties: {
-            code: { type: "string", minLength: 6, maxLength: 6, pattern: "^[0-9A-Za-z]{6}$" },
+            code: { type: "string", minLength: 6, maxLength: 6, pattern: "^[0-9A-TV-Za-tv-z]{6}$" },
             revision: {
               default: "latest",
               anyOf: [
@@ -156,7 +156,7 @@ describe("Production MCP protocol adapter", () => {
       expect(byName.get("append_revision")).toMatchObject({
         inputSchema: {
           properties: {
-            code: { type: "string", minLength: 6, maxLength: 6, pattern: "^[0-9A-Za-z]{6}$" },
+            code: { type: "string", minLength: 6, maxLength: 6, pattern: "^[0-9A-TV-Za-tv-z]{6}$" },
             baseRevision: { type: "integer", exclusiveMinimum: 0 },
             markdown: { type: "string", minLength: 1 },
           },

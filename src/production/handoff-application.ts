@@ -6,6 +6,7 @@ import type {
   HandoffStore,
   HandoffStoreResult,
 } from "./handoff-store.js";
+import { normalizeHandoffCode } from "./handoff-code.js";
 import { MAX_MARKDOWN_BYTES } from "./handoff-limits.js";
 import { redactSpaceKeys } from "./redaction.js";
 
@@ -49,7 +50,11 @@ export function createHandoffApplication(store: HandoffStore): HandoffApplicatio
       });
     },
     getLatestHandoff: ({ spaceId, code }) =>
-      store.getHandoff({ spaceId, code, revision: "latest" }),
+      store.getHandoff({
+        spaceId,
+        code: normalizeHandoffCode(code),
+        revision: "latest",
+      }),
     async appendRevision({
       spaceId,
       code,
@@ -63,7 +68,7 @@ export function createHandoffApplication(store: HandoffStore): HandoffApplicatio
 
       return store.appendRevision({
         spaceId,
-        code,
+        code: normalizeHandoffCode(code),
         baseRevision,
         markdown: redaction.markdown,
         redactionCount: redaction.redactionCount,

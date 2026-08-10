@@ -6,7 +6,7 @@ import {
   MAX_REVISIONS_PER_HANDOFF,
 } from "./handoff-limits.js";
 
-const HANDOFF_CODE_INPUT = z.string().length(6).regex(/^[0-9A-Za-z]{6}$/);
+const HANDOFF_CODE_INPUT = z.string().length(6).regex(/^[0-9A-TV-Za-tv-z]{6}$/);
 const HANDOFF_CODE_OUTPUT = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{6}$/);
 const POSITIVE_INTEGER = z.number().int().positive();
 

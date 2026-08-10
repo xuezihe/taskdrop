@@ -5,7 +5,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { type ProductionConfig } from "../../src/production/config.js";
-import { createPool, type Pool } from "../../src/production/db.js";
+import { createPool, type Pool, withTransaction } from "../../src/production/db.js";
 import { REDACTED_SPACE_KEY_PLACEHOLDER } from "../../src/production/redaction.js";
 import { startProduction, type RunningServer } from "../../src/production/runtime.js";
 import {
@@ -38,6 +38,10 @@ type PersistedMarkdown = {
 type SpaceWriteCounts = {
   handoff_count: number;
   revision_count: number;
+};
+
+type AddressedHandoffState = PersistedHandoffState & {
+  space_id_hex: string;
 };
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -78,6 +82,54 @@ async function reservePort(): Promise<number> {
     server.close((error) => (error ? reject(error) : resolve()));
   });
   return address.port;
+}
+
+async function insertHandoffFixture(
+  pool: Pool,
+  input: {
+    spaceId: Uint8Array;
+    code: string;
+    markdown: string;
+    expired?: boolean;
+  },
+): Promise<void> {
+  await withTransaction(pool, async (client) => {
+    const clock = await client.query<{ now: Date }>("SELECT now() AS now");
+    const createdAt = clock.rows[0]!.now;
+    const direction = input.expired ? -1 : 1;
+    const expiresAt = new Date(createdAt.getTime() + direction * RETENTION_WINDOW_MS);
+    await client.query(
+      `INSERT INTO handoffs (space_id, code, latest_revision, expires_at)
+       VALUES ($1, $2, 1, $3)`,
+      [input.spaceId, input.code, expiresAt],
+    );
+    await client.query(
+      `INSERT INTO revisions
+         (space_id, handoff_code, revision, markdown, created_at, redaction_count)
+       VALUES ($1, $2, 1, $3, $4, 0)`,
+      [input.spaceId, input.code, input.markdown, createdAt],
+    );
+  });
+}
+
+async function readAddressedHandoffState(
+  pool: Pool,
+  code: string,
+  spaceId: Uint8Array,
+  otherSpaceId: Uint8Array,
+): Promise<AddressedHandoffState[]> {
+  const result = await pool.query<AddressedHandoffState>(
+    `SELECT encode(h.space_id, 'hex') AS space_id_hex,
+            h.latest_revision, h.expires_at,
+            count(r.revision)::int AS revision_count
+     FROM handoffs h
+     JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
+     WHERE h.code = $1 AND (h.space_id = $2 OR h.space_id = $3)
+     GROUP BY h.space_id, h.latest_revision, h.expires_at
+     ORDER BY space_id_hex`,
+    [code, spaceId, otherSpaceId],
+  );
+  return result.rows;
 }
 
 describe.skipIf(skip)("Production handoff-loop endpoint", () => {
@@ -519,6 +571,154 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
       await client?.close().catch(() => undefined);
       await running?.shutdown().catch(() => undefined);
       await pool.query("DELETE FROM handoffs WHERE space_id = $1", [spaceId]);
+    }
+  }, 25_000);
+
+  it("normalizes Handoff Codes and keeps invisible Handoffs indistinguishable", async () => {
+    const port = await reservePort();
+    const spaceKey = formatSpaceKey(randomBytes(32));
+    const spaceId = Buffer.from(await deriveSpaceId(parseSpaceKey(spaceKey)));
+    const otherSpaceId = randomBytes(32);
+    const canonicalCode = "01ABCD";
+    const invisibleCode = "01WXYZ";
+    const invisibleAlias = "olwxyz";
+    const expectedNotFound = {
+      ok: false,
+      error: { code: "HANDOFF_NOT_FOUND", handoffCode: invisibleCode },
+    };
+    const config: ProductionConfig = {
+      port,
+      databaseUrl: DATABASE_URL!,
+      retentionWindowMs: RETENTION_WINDOW_MS,
+      logLevel: "silent",
+    };
+
+    let running: RunningServer | undefined;
+    let client: Client | undefined;
+
+    const expectInvisible = async (): Promise<void> => {
+      const results = [
+        await client!.callTool({
+          name: "get_handoff",
+          arguments: { code: invisibleAlias },
+        }),
+        await client!.callTool({
+          name: "append_revision",
+          arguments: {
+            code: invisibleAlias,
+            baseRevision: 99,
+            markdown: "# Must remain invisible",
+          },
+        }),
+      ];
+      for (const result of results) {
+        expect(result.isError).toBe(true);
+        expect(result.structuredContent).toEqual(expectedNotFound);
+      }
+    };
+
+    try {
+      await insertHandoffFixture(pool, {
+        spaceId,
+        code: canonicalCode,
+        markdown: "# Canonical fixture",
+      });
+
+      running = await startProduction(config);
+      client = new Client({ name: "taskdrop-code-normalization-e2e", version: "0.0.0" });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${port}/mcp`),
+        { authProvider: { token: async () => spaceKey } },
+      );
+      await client.connect(transport);
+
+      const invalidU = await client.callTool({
+        name: "get_handoff",
+        arguments: { code: "UUUUUU" },
+      });
+      expect(invalidU.isError).toBe(true);
+      expect(invalidU.structuredContent).toBeUndefined();
+      expect(invalidU.content).toEqual([
+        expect.objectContaining({
+          type: "text",
+          text: expect.stringContaining("Input validation error"),
+        }),
+      ]);
+
+      for (const alias of ["o1abcd", "0iabcd"]) {
+        const read = await client.callTool({
+          name: "get_handoff",
+          arguments: { code: alias },
+        });
+        expect(read.structuredContent).toMatchObject({
+          ok: true,
+          code: canonicalCode,
+          revision: 1,
+          latestRevision: 1,
+          markdown: "# Canonical fixture",
+        });
+      }
+
+      const appended = await client.callTool({
+        name: "append_revision",
+        arguments: {
+          code: "0labcd",
+          baseRevision: 1,
+          markdown: "# Appended through L alias",
+        },
+      });
+      expect(appended.structuredContent).toMatchObject({
+        ok: true,
+        code: canonicalCode,
+        revision: 2,
+        latestRevision: 2,
+        markdown: "# Appended through L alias",
+      });
+
+      await expectInvisible();
+      expect(
+        await readAddressedHandoffState(pool, invisibleCode, spaceId, otherSpaceId),
+      ).toEqual([]);
+
+      await insertHandoffFixture(pool, {
+        spaceId: otherSpaceId,
+        code: invisibleCode,
+        markdown: "# Cross-Space fixture",
+      });
+      const crossSpaceBefore = await readAddressedHandoffState(
+        pool,
+        invisibleCode,
+        spaceId,
+        otherSpaceId,
+      );
+      await expectInvisible();
+      expect(
+        await readAddressedHandoffState(pool, invisibleCode, spaceId, otherSpaceId),
+      ).toEqual(crossSpaceBefore);
+
+      await insertHandoffFixture(pool, {
+        spaceId,
+        code: invisibleCode,
+        markdown: "# Expired fixture",
+        expired: true,
+      });
+      const expiredBefore = await readAddressedHandoffState(
+        pool,
+        invisibleCode,
+        spaceId,
+        otherSpaceId,
+      );
+      await expectInvisible();
+      expect(
+        await readAddressedHandoffState(pool, invisibleCode, spaceId, otherSpaceId),
+      ).toEqual(expiredBefore);
+    } finally {
+      await client?.close().catch(() => undefined);
+      await running?.shutdown().catch(() => undefined);
+      await pool.query("DELETE FROM handoffs WHERE space_id = $1 OR space_id = $2", [
+        spaceId,
+        otherSpaceId,
+      ]);
     }
   }, 25_000);
 });
