@@ -9,13 +9,39 @@ function main(): void {
     process.exit(1);
   }
 
-  process.stdout.write("TaskDrop Space Key\n\n");
-  process.stdout.write(`${key}\n\n`);
-  process.stdout.write("Generated locally from 32 CSPRNG bytes. This CLI does not save it.\n");
-  process.stdout.write("Retain the exact spelling: whitespace, padding, and case changes are invalid.\n\n");
-  process.stdout.write("Preferred carrier: Authorization: Bearer <Space Key>\n");
-  process.stdout.write("Query carrier: taskdropKey on the exact /mcp endpoint only.\n");
-  process.stdout.write("Warning: Query credentials are visible to URL-handling infrastructure.\n");
+  const lines = [
+    "TaskDrop Space Key",
+    "",
+    key,
+    "",
+    "Generated locally from 32 CSPRNG bytes. This CLI does not save it.",
+    "Retain the exact spelling: whitespace, padding, and case changes are invalid.",
+    "",
+    "MCP server fields",
+    "Replace <YOUR_TASKDROP_ORIGIN> with the origin hosting TaskDrop.",
+    "Copy one field into your MCP server configuration.",
+    "For non-JSON client configurations, map the same field names and values.",
+    "",
+    "Query carrier",
+    "Warning: Query credentials are visible to URL-handling infrastructure.",
+    "",
+    '"taskdrop-query": {',
+    `  "url": "<YOUR_TASKDROP_ORIGIN>/mcp?taskdropKey=${key}",`,
+    '  "transport": "http"',
+    "}",
+    "",
+    "Bearer carrier (recommended)",
+    "",
+    '"taskdrop-bearer": {',
+    '  "url": "<YOUR_TASKDROP_ORIGIN>/mcp",',
+    '  "transport": "http",',
+    '  "headers": {',
+    `    "Authorization": "Bearer ${key}"`,
+    "  }",
+    "}",
+  ];
+
+  process.stdout.write(`${lines.join("\n")}\n`);
 }
 
 main();

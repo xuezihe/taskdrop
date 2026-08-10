@@ -17,6 +17,32 @@ describe("setup CLI output", () => {
     expect(keyLine).toBeDefined();
   });
 
+  it("prints Query and Bearer MCP server fields using the generated Space Key", () => {
+    const output = runCli();
+    const key = output.match(/^tdp_[A-Za-z0-9_-]{43}$/m)?.[0];
+    if (!key) throw new Error("Expected the CLI to print a canonical Space Key");
+
+    expect(output).toContain(
+      [
+        '"taskdrop-query": {',
+        `  "url": "<YOUR_TASKDROP_ORIGIN>/mcp?taskdropKey=${key}",`,
+        '  "transport": "http"',
+        "}",
+      ].join("\n"),
+    );
+    expect(output).toContain(
+      [
+        '"taskdrop-bearer": {',
+        '  "url": "<YOUR_TASKDROP_ORIGIN>/mcp",',
+        '  "transport": "http",',
+        '  "headers": {',
+        `    "Authorization": "Bearer ${key}"`,
+        "  }",
+        "}",
+      ].join("\n"),
+    );
+  });
+
   it("tells the user to retain exact spelling", () => {
     const output = runCli().toLowerCase();
     expect(output).toMatch(/retain|exact spelling/);
