@@ -30,6 +30,16 @@ type PersistedHandoffState = {
   revision_count: number;
 };
 
+type PersistedMarkdown = {
+  markdown: string;
+  markdown_bytes: number;
+};
+
+type SpaceWriteCounts = {
+  handoff_count: number;
+  revision_count: number;
+};
+
 function asRecord(value: unknown): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error("Expected a structured MCP result");
@@ -315,6 +325,200 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
           code,
         ]);
       }
+    }
+  }, 25_000);
+
+  it("enforces the raw UTF-8 Markdown byte boundary without partial writes", async () => {
+    const port = await reservePort();
+    const spaceKey = formatSpaceKey(randomBytes(32));
+    const spaceId = Buffer.from(await deriveSpaceId(parseSpaceKey(spaceKey)));
+    const oversizedCreateMarkdown = `${"A".repeat(262_097)}\n${spaceKey}`;
+    const exactLimitMarkdown = `${"界".repeat(87_381)}a`;
+    const oversizedAppendMarkdown = `${"界".repeat(87_365)}\n# ${spaceKey}`;
+    const config: ProductionConfig = {
+      port,
+      databaseUrl: DATABASE_URL!,
+      retentionWindowMs: RETENTION_WINDOW_MS,
+      logLevel: "silent",
+    };
+
+    let running: RunningServer | undefined;
+    let client: Client | undefined;
+
+    try {
+      running = await startProduction(config);
+      client = new Client({ name: "taskdrop-size-boundary-e2e", version: "0.0.0" });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${port}/mcp`),
+        { authProvider: { token: async () => spaceKey } },
+      );
+      await client.connect(transport);
+
+      const oversizedCreate = await client.callTool({
+        name: "create_handoff",
+        arguments: { markdown: oversizedCreateMarkdown },
+      });
+      expect(oversizedCreate.isError).toBe(true);
+      expect(oversizedCreate.structuredContent).toEqual({
+        ok: false,
+        error: { code: "CONTENT_TOO_LARGE", limitBytes: 262_144 },
+      });
+
+      const countsAfterRejectedCreate = await pool.query<SpaceWriteCounts>(
+        `SELECT
+           (SELECT count(*)::int FROM handoffs WHERE space_id = $1) AS handoff_count,
+           (SELECT count(*)::int FROM revisions WHERE space_id = $1) AS revision_count`,
+        [spaceId],
+      );
+      expect(countsAfterRejectedCreate.rows).toEqual([
+        { handoff_count: 0, revision_count: 0 },
+      ]);
+
+      const exactLimitCreate = await client.callTool({
+        name: "create_handoff",
+        arguments: { markdown: exactLimitMarkdown },
+      });
+      const exactLimitSnapshot = asRecord(exactLimitCreate.structuredContent);
+      const code = String(exactLimitSnapshot.code);
+      expect(exactLimitSnapshot).toMatchObject({
+        ok: true,
+        revision: 1,
+        latestRevision: 1,
+        markdown: exactLimitMarkdown,
+      });
+
+      const persistedExactLimit = await pool.query<PersistedMarkdown>(
+        `SELECT markdown, octet_length(markdown)::int AS markdown_bytes
+         FROM revisions
+         WHERE space_id = $1 AND handoff_code = $2 AND revision = 1`,
+        [spaceId, code],
+      );
+      expect(persistedExactLimit.rows).toEqual([
+        { markdown: exactLimitMarkdown, markdown_bytes: 262_144 },
+      ]);
+
+      const stateBeforeRejectedAppend = await pool.query<PersistedHandoffState>(
+        `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
+         FROM handoffs h
+         JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
+         WHERE h.space_id = $1 AND h.code = $2
+         GROUP BY h.latest_revision, h.expires_at`,
+        [spaceId, code],
+      );
+
+      const oversizedAppend = await client.callTool({
+        name: "append_revision",
+        arguments: {
+          code,
+          baseRevision: 1,
+          markdown: oversizedAppendMarkdown,
+        },
+      });
+      expect(oversizedAppend.isError).toBe(true);
+      expect(oversizedAppend.structuredContent).toEqual({
+        ok: false,
+        error: { code: "CONTENT_TOO_LARGE", limitBytes: 262_144 },
+      });
+
+      const stateAfterRejectedAppend = await pool.query<PersistedHandoffState>(
+        `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
+         FROM handoffs h
+         JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
+         WHERE h.space_id = $1 AND h.code = $2
+         GROUP BY h.latest_revision, h.expires_at`,
+        [spaceId, code],
+      );
+      expect(stateAfterRejectedAppend.rows).toEqual(stateBeforeRejectedAppend.rows);
+    } finally {
+      await client?.close().catch(() => undefined);
+      await running?.shutdown().catch(() => undefined);
+      await pool.query("DELETE FROM handoffs WHERE space_id = $1", [spaceId]);
+    }
+  }, 25_000);
+
+  it("rejects Revision 26 through MCP without changing the Handoff", async () => {
+    const port = await reservePort();
+    const spaceKey = formatSpaceKey(randomBytes(32));
+    const spaceId = Buffer.from(await deriveSpaceId(parseSpaceKey(spaceKey)));
+    const config: ProductionConfig = {
+      port,
+      databaseUrl: DATABASE_URL!,
+      retentionWindowMs: RETENTION_WINDOW_MS,
+      logLevel: "silent",
+    };
+
+    let running: RunningServer | undefined;
+    let client: Client | undefined;
+
+    try {
+      running = await startProduction(config);
+      client = new Client({ name: "taskdrop-revision-limit-e2e", version: "0.0.0" });
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${port}/mcp`),
+        { authProvider: { token: async () => spaceKey } },
+      );
+      await client.connect(transport);
+
+      const created = await client.callTool({
+        name: "create_handoff",
+        arguments: { markdown: "# Revision 1" },
+      });
+      const code = String(asRecord(created.structuredContent).code);
+
+      await pool.query(
+        `WITH inserted AS (
+           INSERT INTO revisions
+             (space_id, handoff_code, revision, markdown, created_at, redaction_count)
+           SELECT $1, $2, revision, '# Revision ' || revision, now(), 0
+           FROM generate_series(2, 25) AS revision
+           RETURNING revision
+         )
+         UPDATE handoffs
+         SET latest_revision = 25
+         WHERE space_id = $1 AND code = $2
+           AND (SELECT count(*) FROM inserted) = 24`,
+        [spaceId, code],
+      );
+
+      const stateBeforeLimit = await pool.query<PersistedHandoffState>(
+        `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
+         FROM handoffs h
+         JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
+         WHERE h.space_id = $1 AND h.code = $2
+         GROUP BY h.latest_revision, h.expires_at`,
+        [spaceId, code],
+      );
+      expect(stateBeforeLimit.rows).toMatchObject([
+        { latest_revision: 25, revision_count: 25 },
+      ]);
+
+      const rejected = await client.callTool({
+        name: "append_revision",
+        arguments: {
+          code,
+          baseRevision: 25,
+          markdown: "# Revision 26 must be rejected",
+        },
+      });
+      expect(rejected.isError).toBe(true);
+      expect(rejected.structuredContent).toEqual({
+        ok: false,
+        error: { code: "REVISION_LIMIT_REACHED", limit: 25 },
+      });
+
+      const stateAfterLimit = await pool.query<PersistedHandoffState>(
+        `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
+         FROM handoffs h
+         JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
+         WHERE h.space_id = $1 AND h.code = $2
+         GROUP BY h.latest_revision, h.expires_at`,
+        [spaceId, code],
+      );
+      expect(stateAfterLimit.rows).toEqual(stateBeforeLimit.rows);
+    } finally {
+      await client?.close().catch(() => undefined);
+      await running?.shutdown().catch(() => undefined);
+      await pool.query("DELETE FROM handoffs WHERE space_id = $1", [spaceId]);
     }
   }, 25_000);
 });

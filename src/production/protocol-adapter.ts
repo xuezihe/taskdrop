@@ -1,6 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
+import {
+  MAX_MARKDOWN_BYTES,
+  MAX_REVISIONS_PER_HANDOFF,
+} from "./handoff-limits.js";
+
 const HANDOFF_CODE_INPUT = z.string().length(6).regex(/^[0-9A-Za-z]{6}$/);
 const HANDOFF_CODE_OUTPUT = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{6}$/);
 const POSITIVE_INTEGER = z.number().int().positive();
@@ -39,7 +44,7 @@ const revisionLimitReachedSchema = z.object({
   ok: z.literal(false),
   error: z.object({
     code: z.literal("REVISION_LIMIT_REACHED"),
-    limit: z.literal(25),
+    limit: z.literal(MAX_REVISIONS_PER_HANDOFF),
   }),
 });
 
@@ -55,7 +60,7 @@ const contentTooLargeSchema = z.object({
   ok: z.literal(false),
   error: z.object({
     code: z.literal("CONTENT_TOO_LARGE"),
-    limitBytes: z.literal(262144),
+    limitBytes: z.literal(MAX_MARKDOWN_BYTES),
   }),
 });
 

@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import type { Pool, PoolClient } from "./db.js";
 import { withTransaction } from "./db.js";
+import { MAX_REVISIONS_PER_HANDOFF } from "./handoff-limits.js";
 
 // Crockford Base32 excludes I, L, O, U so generated codes survive input normalization.
 // O -> 0, I -> 1, L -> 1 defined by the Tool Contract.
@@ -37,6 +38,10 @@ export type HandoffStoreError =
   | {
       ok: false;
       error: { code: "REVISION_CONFLICT"; expectedRevision: number; receivedBaseRevision: number };
+    }
+  | {
+      ok: false;
+      error: { code: "REVISION_LIMIT_REACHED"; limit: typeof MAX_REVISIONS_PER_HANDOFF };
     }
   | { ok: false; error: { code: "SPACE_QUOTA_EXCEEDED"; quota: "handoffs" | "retainedMarkdown" } };
 
@@ -245,6 +250,16 @@ export function createHandoffStore(
               code: "REVISION_CONFLICT",
               expectedRevision: handoff.latest_revision,
               receivedBaseRevision: baseRevision,
+            },
+          };
+        }
+
+        if (handoff.latest_revision >= MAX_REVISIONS_PER_HANDOFF) {
+          return {
+            ok: false,
+            error: {
+              code: "REVISION_LIMIT_REACHED",
+              limit: MAX_REVISIONS_PER_HANDOFF,
             },
           };
         }

@@ -1,0 +1,2 @@
+export const MAX_MARKDOWN_BYTES = 262_144;
+export const MAX_REVISIONS_PER_HANDOFF = 25;
