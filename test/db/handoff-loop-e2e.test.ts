@@ -37,6 +37,19 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function expectFullRetentionWindow(snapshot: Record<string, unknown>): void {
+  expect(Date.parse(String(snapshot.expiresAt)) - Date.parse(String(snapshot.createdAt))).toBe(
+    RETENTION_WINDOW_MS,
+  );
+}
+
+function expectNoRawSpaceKeys(value: unknown, spaceKeys: string[]): void {
+  const serialized = JSON.stringify(value);
+  for (const spaceKey of spaceKeys) {
+    expect(serialized).not.toContain(spaceKey);
+  }
+}
+
 async function reservePort(): Promise<number> {
   const server = createServer();
   await new Promise<void>((resolve, reject) => {
@@ -143,8 +156,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
       });
       expect(Number.isNaN(Date.parse(String(snapshot.createdAt)))).toBe(false);
       expect(Number.isNaN(Date.parse(String(snapshot.expiresAt)))).toBe(false);
-      expect(JSON.stringify(result)).not.toContain(spaceKey);
-      expect(JSON.stringify(result)).not.toContain(otherSpaceKey);
+      expectNoRawSpaceKeys(result, [spaceKey, otherSpaceKey]);
 
       await client.close();
       client = undefined;
@@ -190,12 +202,8 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         createdAt: expect.any(String),
         expiresAt: expect.any(String),
       });
-      expect(
-        Date.parse(String(appendedSnapshot.expiresAt)) -
-          Date.parse(String(appendedSnapshot.createdAt)),
-      ).toBe(RETENTION_WINDOW_MS);
-      expect(JSON.stringify(appended)).not.toContain(spaceKey);
-      expect(JSON.stringify(appended)).not.toContain(otherSpaceKey);
+      expectFullRetentionWindow(appendedSnapshot);
+      expectNoRawSpaceKeys(appended, [spaceKey, otherSpaceKey]);
 
       const latestAfterAppend = await client.callTool({
         name: "get_handoff",
@@ -224,10 +232,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         createdAt: expect.any(String),
         expiresAt: expect.any(String),
       });
-      expect(
-        Date.parse(String(thirdRevisionSnapshot.expiresAt)) -
-          Date.parse(String(thirdRevisionSnapshot.createdAt)),
-      ).toBe(RETENTION_WINDOW_MS);
+      expectFullRetentionWindow(thirdRevisionSnapshot);
 
       const latestAfterSecondAppend = await client.callTool({
         name: "get_handoff",
@@ -255,8 +260,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
           redaction_count: 2,
         },
       ]);
-      expect(JSON.stringify(persistedRedactedRevisions.rows)).not.toContain(spaceKey);
-      expect(JSON.stringify(persistedRedactedRevisions.rows)).not.toContain(otherSpaceKey);
+      expectNoRawSpaceKeys(persistedRedactedRevisions.rows, [spaceKey, otherSpaceKey]);
 
       const stateBeforeConflict = await pool.query<PersistedHandoffState>(
         `SELECT h.latest_revision, h.expires_at, count(r.revision)::int AS revision_count
