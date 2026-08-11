@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { createPool, type Pool } from "../../src/production/db.js";
+import { createPool, type Pool, withTransaction } from "../../src/production/db.js";
 import {
   createHandoffStore,
   type HandoffStore,
@@ -25,6 +25,31 @@ function assertSnapshot(r: unknown): asserts r is RevisionSnapshot {
 
 const CODE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{6}$/;
 const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/;
+
+type PersistedAppendState = {
+  code: string;
+  expires_at: Date;
+  latest_revision: number;
+  revision_count: number;
+};
+
+async function readAppendStates(
+  pool: Pool,
+  spaceId: Uint8Array,
+): Promise<PersistedAppendState[]> {
+  const result = await pool.query<PersistedAppendState>(
+    `SELECT h.code, h.latest_revision, h.expires_at,
+            count(r.revision)::int AS revision_count
+     FROM handoffs h
+     JOIN revisions r
+       ON r.space_id = h.space_id AND r.handoff_code = h.code
+     WHERE h.space_id = $1
+     GROUP BY h.code, h.latest_revision, h.expires_at
+     ORDER BY h.code`,
+    [spaceId],
+  );
+  return result.rows;
+}
 
 async function getBackendPid(pool: Pool): Promise<number> {
   const result = await pool.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
@@ -634,5 +659,97 @@ describe.skipIf(skip)("HandoffStore best-effort Space quota", () => {
     expect(isSnapshot(r3)).toBe(true);
     assertSnapshot(r3);
     expect(r3.revision).toBe(1);
+  });
+
+  it("applies not-found, conflict, Revision limit, and Space quota precedence without mutation", async () => {
+    const spaceId = randomBytes(32);
+    const store = createHandoffStore(pool, RETENTION_WINDOW_MS, {
+      maxLiveHandoffs: 32,
+      maxRetainedMarkdownBytes: 1,
+    });
+    const cases = [
+      {
+        code: "P00001",
+        latestRevision: 2,
+        expired: true,
+        baseRevision: 1,
+        expected: {
+          ok: false,
+          error: { code: "HANDOFF_NOT_FOUND", handoffCode: "P00001" },
+        },
+      },
+      {
+        code: "P00002",
+        latestRevision: 25,
+        expired: false,
+        baseRevision: 24,
+        expected: {
+          ok: false,
+          error: {
+            code: "REVISION_CONFLICT",
+            expectedRevision: 25,
+            receivedBaseRevision: 24,
+          },
+        },
+      },
+      {
+        code: "P00003",
+        latestRevision: 25,
+        expired: false,
+        baseRevision: 25,
+        expected: {
+          ok: false,
+          error: { code: "REVISION_LIMIT_REACHED", limit: 25 },
+        },
+      },
+      {
+        code: "P00004",
+        latestRevision: 24,
+        expired: false,
+        baseRevision: 24,
+        expected: {
+          ok: false,
+          error: { code: "SPACE_QUOTA_EXCEEDED", quota: "retainedMarkdown" },
+        },
+      },
+    ] as const;
+
+    try {
+      await withTransaction(pool, async (client) => {
+        for (const testCase of cases) {
+          await client.query(
+            `INSERT INTO handoffs (space_id, code, latest_revision, expires_at)
+             VALUES ($1, $2, $3,
+               CASE WHEN $4 THEN now() - interval '1 second'
+                    ELSE now() + interval '7 days' END)`,
+            [spaceId, testCase.code, testCase.latestRevision, testCase.expired],
+          );
+          await client.query(
+            `INSERT INTO revisions
+               (space_id, handoff_code, revision, markdown, created_at, redaction_count)
+             SELECT $1, $2, revision, '# Revision ' || revision, now(), 0
+             FROM generate_series(1, $3) AS revision`,
+            [spaceId, testCase.code, testCase.latestRevision],
+          );
+        }
+      });
+
+      const stateBefore = await readAppendStates(pool, spaceId);
+      expect(stateBefore).toHaveLength(cases.length);
+
+      for (const testCase of cases) {
+        const result = await store.appendRevision({
+          spaceId,
+          code: testCase.code,
+          baseRevision: testCase.baseRevision,
+          markdown: "# This Revision must not be stored",
+          redactionCount: 0,
+        });
+        expect(result).toEqual(testCase.expected);
+        expect(await readAppendStates(pool, spaceId)).toEqual(stateBefore);
+      }
+    } finally {
+      await pool.query("DELETE FROM handoffs WHERE space_id = $1", [spaceId]);
+    }
   });
 });

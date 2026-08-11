@@ -7,10 +7,14 @@ import {
   type ToolResult,
 } from "../src/production/protocol-adapter.js";
 
+const UNEXPECTED_HANDLER_REQUEST_ID = "00000000-0000-4000-8000-000000000000";
 const unexpectedHandlerResult = {
   ok: false,
-  error: { code: "INTERNAL_ERROR", requestId: "unexpected-handler-call" },
+  error: { code: "INTERNAL_ERROR", requestId: UNEXPECTED_HANDLER_REQUEST_ID },
 } as const satisfies ToolResult;
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type JsonSchema = {
   anyOf?: JsonSchema[];
@@ -112,6 +116,7 @@ describe("Production MCP protocol adapter", () => {
             text: expect.stringContaining("Input validation error"),
           }),
         ]);
+        expect(JSON.stringify(result)).not.toContain(UNEXPECTED_HANDLER_REQUEST_ID);
       }
     });
   });
@@ -251,7 +256,7 @@ describe("Production MCP protocol adapter", () => {
         retryAfterSeconds: { type: "integer", exclusiveMinimum: 0 },
       });
       expect(errorProperties(byName.get("append_revision")?.outputSchema, "INTERNAL_ERROR")).toMatchObject({
-        requestId: { type: "string", minLength: 1 },
+        requestId: { type: "string", format: "uuid" },
       });
     });
   });
@@ -321,6 +326,60 @@ describe("Production MCP protocol adapter", () => {
             text: JSON.stringify(conflict),
           },
         ]);
+      },
+    );
+  });
+
+  it("maps independent unexpected handler failures to opaque INTERNAL_ERROR results", async () => {
+    const createFailureMarker = "create database failure: SELECT secret_value";
+    const appendFailureMarker = "append redaction failure with private cause";
+
+    await withProtocolClient(
+      {
+        createHandoff: async () => {
+          throw new Error(createFailureMarker);
+        },
+        appendRevision: async () => {
+          throw new Error(appendFailureMarker, {
+            cause: new Error("private nested cause"),
+          });
+        },
+      },
+      async (client) => {
+        const results = [
+          await client.callTool({
+            name: "create_handoff",
+            arguments: { markdown: "# Valid create" },
+          }),
+          await client.callTool({
+            name: "append_revision",
+            arguments: {
+              code: "7Q3K9F",
+              baseRevision: 1,
+              markdown: "# Valid append",
+            },
+          }),
+        ];
+
+        const requestIds = results.map((result) => {
+          expect(result.isError).toBe(true);
+          expect(result.structuredContent).toEqual({
+            ok: false,
+            error: {
+              code: "INTERNAL_ERROR",
+              requestId: expect.stringMatching(UUID_PATTERN),
+            },
+          });
+          expect(JSON.stringify(result)).not.toContain(createFailureMarker);
+          expect(JSON.stringify(result)).not.toContain(appendFailureMarker);
+          expect(JSON.stringify(result)).not.toContain("private nested cause");
+
+          return (result.structuredContent as {
+            error: { requestId: string };
+          }).error.requestId;
+        });
+
+        expect(new Set(requestIds).size).toBe(2);
       },
     );
   });

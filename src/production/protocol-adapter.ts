@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
@@ -76,7 +78,7 @@ const internalErrorSchema = z.object({
   ok: z.literal(false),
   error: z.object({
     code: z.literal("INTERNAL_ERROR"),
-    requestId: z.string().min(1),
+    requestId: z.string().uuid(),
   }),
 });
 
@@ -136,6 +138,19 @@ function encodeToolResult<Result extends ToolResult>(result: Result) {
   };
 }
 
+async function executeTool<Result extends ToolResult>(
+  operation: () => Promise<Result>,
+) {
+  try {
+    return encodeToolResult(await operation());
+  } catch {
+    return encodeToolResult({
+      ok: false,
+      error: { code: "INTERNAL_ERROR", requestId: randomUUID() },
+    } as const satisfies ToolResult);
+  }
+}
+
 export function createProtocolServer(handlers: ProtocolToolHandlers): McpServer {
   const server = new McpServer({ name: "taskdrop", version: "0.0.0" });
 
@@ -150,7 +165,7 @@ export function createProtocolServer(handlers: ProtocolToolHandlers): McpServer 
         idempotentHint: false,
       },
     },
-    async (input) => encodeToolResult(await handlers.createHandoff(input)),
+    (input) => executeTool(() => handlers.createHandoff(input)),
   );
 
   server.registerTool(
@@ -160,7 +175,7 @@ export function createProtocolServer(handlers: ProtocolToolHandlers): McpServer 
       outputSchema: getHandoffResultSchema,
       annotations: { readOnlyHint: true },
     },
-    async (input) => encodeToolResult(await handlers.getHandoff(input)),
+    (input) => executeTool(() => handlers.getHandoff(input)),
   );
 
   server.registerTool(
@@ -174,7 +189,7 @@ export function createProtocolServer(handlers: ProtocolToolHandlers): McpServer 
         idempotentHint: false,
       },
     },
-    async (input) => encodeToolResult(await handlers.appendRevision(input)),
+    (input) => executeTool(() => handlers.appendRevision(input)),
   );
 
   return server;
