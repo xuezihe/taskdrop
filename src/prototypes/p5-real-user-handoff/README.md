@@ -1,6 +1,6 @@
 # P5 Real User Handoff - Prototype / Throw Away
 
-Question: can the minimal Setup Page, TaskDrop Handoff Skill, Devin Desktop,
+Question: can the minimal Setup Page, TaskDrop Skill, Devin Desktop,
 and Codex move one realistic task through a localhost MCP Server without
 copying Markdown or re-explaining constraints?
 
@@ -30,7 +30,7 @@ analytics, URL parameters, `localStorage`, or `sessionStorage`.
   waits for input; do not paste a literal Key into a shell command. After the
   command finishes, start or restart Codex from that same shell so it inherits
   the environment variable.
-- MCP connection setup and Handoff Skill setup are deliberately separate.
+- MCP connection setup and TaskDrop Skill setup are deliberately separate.
 
 Configuration references: [Devin MCP](https://docs.devin.ai/work-with-devin/mcp),
 [Devin Desktop MCP](https://docs.devin.ai/work-with-devin/devin-mcp), and
@@ -61,13 +61,13 @@ Devin compatibility problem inside the real-user flow.
 ### B. Realistic Handoff
 
 1. Type `s` and Return.
-2. In Devin Desktop, use the TaskDrop Handoff Skill to package a realistic
+2. In Devin Desktop, use the TaskDrop Skill to package a realistic
    current task and call `create_handoff`.
 3. Transfer only the six-character Handoff Code to Codex. Do not manually copy
    the Markdown.
 4. Type `c` and Return.
 5. In Codex, read `latest`, continue the task, then append a complete new
-   Revision through the Handoff Skill.
+   Revision through the TaskDrop Skill.
 6. Type `r` and Return.
 7. In Devin Desktop, read the new `latest` and confirm that work can continue
    without the user restating the goal or constraints.

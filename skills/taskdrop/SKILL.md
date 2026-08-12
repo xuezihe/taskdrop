@@ -13,8 +13,9 @@ underlying protocol.
 - If the user asks what TaskDrop or this Skill does, explain it without calling
   a Tool. Say that TaskDrop carries current work to another AI through a short
   Handoff Code. Describe `create_handoff`, `get_handoff`, and
-  `append_revision` simply as create, load, and update. Do not introduce
-  technical details unless the user asks for them.
+  `append_revision` simply as create, load, and update. Give short examples of
+  how to ask TaskDrop to hand off current work, load a Code, or update a Code.
+  Do not introduce technical details unless the user asks for them.
 - If the user asks to create, load, inspect, resume, or update a Handoff, follow
   the operation rules. Do not turn an operational request into a tutorial.
 - If the user asks for both an explanation and an operation, explain briefly,
@@ -25,8 +26,11 @@ configuration, never in conversation, Tool arguments, or Handoff Markdown.
 
 ## Choose the operation
 
-- When no Handoff Code is supplied, prepare a new Handoff and call
-  `create_handoff`.
+- When the user requests a new Handoff and supplies no Handoff Code, prepare it
+  and call `create_handoff`.
+- When the user asks to load, inspect, resume, or update an existing Handoff
+  but supplies no Handoff Code, ask for the Code. Never create a different
+  Handoff instead.
 - When a Handoff Code is supplied without an explicit update request, call
   `get_handoff` with `revision: "latest"`. Load the work and continue; never
   append automatically.
@@ -49,6 +53,10 @@ Before `create_handoff`, ask at most one question only when the missing answer
 would materially change the Handoff. Make it about the real tradeoff in the
 current work, give two or three concrete choices, and recommend one with a
 short reason. Never ask a generic question such as “What should I preserve?”
+
+Treat a request that only says the user wants to switch to another AI as
+missing a material content preference. Ask the one context-specific question
+before creating the Handoff.
 
 Do not ask when the user already supplied the needed preference, requests an
 immediate Handoff, declines confirmation, or the work and destination are
@@ -96,8 +104,10 @@ user to use the Code in the receiving AI.
 After a successful get, report the Handoff Code, loaded Revision, expiry, and
 whether it is latest. Briefly summarize the actual Markdown: cover the current
 goal, progress, important constraints or decisions, unfinished work, and next
-step when present. Explicitly say the Handoff is loaded into the current
-context and work can continue.
+step when present. Do not repeat any Space Key, API key, password, access token,
+or other private credential found in retrieved Markdown; mention only that
+credential material was omitted when relevant. Explicitly say the Handoff is
+loaded into the current context and work can continue.
 
 If get fails, say that the Handoff was not loaded. Never invent a summary from
 the Code or earlier conversation, and never claim that work can continue from

@@ -1,7 +1,7 @@
 /**
  * PROTOTYPE - THROW AWAY.
  *
- * Question: can a local Setup Page, the TaskDrop Handoff Skill, Devin Desktop,
+ * Question: can a local Setup Page, the TaskDrop Skill, Devin Desktop,
  * and Codex complete one realistic Handoff without copying Markdown?
  */
 
