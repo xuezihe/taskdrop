@@ -6,3 +6,5 @@ coverage/
 !.env.example
 .DS_Store
 *.log
+deploy/server/*.env
+!deploy/server/*.env.example

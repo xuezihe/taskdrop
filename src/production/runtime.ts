@@ -12,10 +12,12 @@ import { createMcpEndpoint } from "./mcp-endpoint.js";
 import { createMcpHttpAuthenticationHandler } from "./mcp-http-auth.js";
 
 export interface RunningServer {
+  readonly host: string;
   readonly port: number;
   shutdown(): Promise<void>;
 }
 
+const PRODUCTION_HOST = "127.0.0.1";
 const SHUTDOWN_DRAIN_MS = 5_000;
 const HEALTH_PROBE_TIMEOUT_MS = 2_000;
 
@@ -74,11 +76,17 @@ export async function startProduction(config: ProductionConfig): Promise<Running
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(config.port, () => {
+    server.listen(config.port, PRODUCTION_HOST, () => {
       server.removeListener("error", reject);
       resolve();
     });
   });
+  const listenerAddress = server.address();
+  if (!listenerAddress || typeof listenerAddress === "string") {
+    server.close();
+    await pool.end();
+    throw new Error("production listener did not expose a TCP address");
+  }
 
   const observeCleanup = (observation: CleanupObservation): void => {
     if (config.logLevel === "silent") return;
@@ -111,7 +119,11 @@ export async function startProduction(config: ProductionConfig): Promise<Running
     return shutdownPromise;
   };
 
-  return { port: config.port, shutdown };
+  return {
+    host: listenerAddress.address,
+    port: listenerAddress.port,
+    shutdown,
+  };
 }
 
 export type { Server };

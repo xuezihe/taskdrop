@@ -1,0 +1,23 @@
+name: taskdrop
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    env_file:
+      - ${TASKDROP_POSTGRES_ENV_FILE:-/etc/taskdrop/postgres.env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - taskdrop-postgres-data:/var/lib/postgresql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"'
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    stop_grace_period: 30s
+
+volumes:
+  taskdrop-postgres-data:

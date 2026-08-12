@@ -4,7 +4,9 @@ import { startProduction } from "./runtime.js";
 async function main(): Promise<void> {
   const config = resolveConfig(process.env);
   const running = await startProduction(config);
-  process.stdout.write(`taskdrop production listening on :${running.port}\n`);
+  process.stdout.write(
+    `taskdrop production listening on ${running.host}:${running.port}\n`,
+  );
 
   const stop = (): void => {
     void running.shutdown().then(
