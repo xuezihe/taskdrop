@@ -1,0 +1,4 @@
+interface:
+  display_name: "TaskDrop"
+  short_description: "Move work between AI clients with a Handoff"
+  default_prompt: "Use $taskdrop to move, load, or update work between AI clients."

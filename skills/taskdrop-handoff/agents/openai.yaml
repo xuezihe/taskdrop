@@ -1,4 +1,0 @@
-interface:
-  display_name: "TaskDrop Handoff"
-  short_description: "Package the current work for another AI"
-  default_prompt: "Use $taskdrop-handoff to package this conversation for another AI, preserving the latest exchange."

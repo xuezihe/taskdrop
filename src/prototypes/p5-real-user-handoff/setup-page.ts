@@ -61,7 +61,7 @@ export function createSetupPage(endpoint: string): string {
   <section class="step">
     <h2>3. Install the Handoff skill separately</h2>
     <p>MCP provides <code>create_handoff</code>, <code>get_handoff</code>, and <code>append_revision</code>. The Handoff skill defines what context belongs in Markdown.</p>
-    <pre>skills/taskdrop-handoff/SKILL.md</pre>
+    <pre>skills/taskdrop/SKILL.md</pre>
     <p class="muted">Run both clients in this repository and explicitly ask them to read this file if they do not auto-discover project skills. Never paste the Space Key into the skill or Handoff Markdown.</p>
   </section>
 

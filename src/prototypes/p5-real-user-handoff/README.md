@@ -38,7 +38,7 @@ Configuration references: [Devin MCP](https://docs.devin.ai/work-with-devin/mcp)
 
 Run both clients with this repository as their working context. If either
 client does not auto-discover project skills, explicitly ask it to read and
-follow `skills/taskdrop-handoff/SKILL.md` before creating or appending the real
+follow `skills/taskdrop/SKILL.md` before creating or appending the real
 Handoff.
 
 If an existing `taskdrop-p5` Codex entry exists, remove or update it before
