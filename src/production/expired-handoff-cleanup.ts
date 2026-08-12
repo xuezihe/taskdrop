@@ -5,7 +5,6 @@ const CLEANUP_OPERATION = "cleanup_expired_handoffs";
 export type CleanupObservation =
   | {
       operation: typeof CLEANUP_OPERATION;
-      outcome: "success";
       deletedHandoffs: number;
       durationMs: number;
     }
@@ -51,7 +50,6 @@ export function startExpiredHandoffCleanup(input: {
         const deletedHandoffs = await input.cleanupPass();
         observe({
           operation: CLEANUP_OPERATION,
-          outcome: "success",
           deletedHandoffs,
           durationMs: Date.now() - startedAt,
         });

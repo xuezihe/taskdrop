@@ -40,7 +40,6 @@ describe("expired Handoff cleanup lifecycle", () => {
     expect(observations).toEqual([
       {
         operation: "cleanup_expired_handoffs",
-        outcome: "success",
         deletedHandoffs: 3,
         durationMs: 0,
       },
@@ -110,7 +109,6 @@ describe("expired Handoff cleanup lifecycle", () => {
     expect(passCount).toBe(2);
     expect(observations[1]).toEqual({
       operation: "cleanup_expired_handoffs",
-      outcome: "success",
       deletedHandoffs: 2,
       durationMs: 0,
     });

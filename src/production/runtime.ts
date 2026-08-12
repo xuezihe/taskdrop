@@ -82,7 +82,7 @@ export async function startProduction(config: ProductionConfig): Promise<Running
 
   const observeCleanup = (observation: CleanupObservation): void => {
     if (config.logLevel === "silent") return;
-    const destination = observation.outcome === "failure" ? process.stderr : process.stdout;
+    const destination = "outcome" in observation ? process.stderr : process.stdout;
     destination.write(`${JSON.stringify(observation)}\n`);
   };
   const cleanup = startExpiredHandoffCleanup({

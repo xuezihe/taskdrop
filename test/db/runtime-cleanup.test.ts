@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { ProductionConfig } from "../../src/production/config.js";
 import { createPool, type Pool, withTransaction } from "../../src/production/db.js";
@@ -43,7 +43,7 @@ describe.skipIf(skip)("Production expired Handoff cleanup wiring", () => {
     await pool.end();
   });
 
-  it("starts cleanup after listener readiness without affecting health or live Handoffs", async () => {
+  it("returns listener readiness before cleanup and isolates cleanup failure from health", async () => {
     const port = await reservePort();
     const liveSpaceId = randomBytes(32);
     const expiredSpaceId = randomBytes(32);
@@ -53,9 +53,14 @@ describe.skipIf(skip)("Production expired Handoff cleanup wiring", () => {
       port,
       databaseUrl: DATABASE_URL!,
       retentionWindowMs: RETENTION_WINDOW_MS,
-      logLevel: "silent",
+      logLevel: "info",
     };
     let running: RunningServer | undefined;
+    let stderrOutput = "";
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      stderrOutput += String(chunk);
+      return true;
+    });
 
     await withTransaction(pool, async (client) => {
       await client.query(
@@ -72,26 +77,38 @@ describe.skipIf(skip)("Production expired Handoff cleanup wiring", () => {
         [liveSpaceId, liveCode, expiredSpaceId, expiredCode],
       );
     });
+    await pool.query(
+      `CREATE OR REPLACE FUNCTION taskdrop_test_reject_cleanup()
+       RETURNS trigger
+       LANGUAGE plpgsql
+       AS $$
+       BEGIN
+         RAISE EXCEPTION 'sensitive cleanup failure from test trigger';
+       END;
+       $$`,
+    );
+    await pool.query(
+      `CREATE TRIGGER taskdrop_test_reject_cleanup
+       BEFORE DELETE ON handoffs
+       FOR EACH STATEMENT
+       EXECUTE FUNCTION taskdrop_test_reject_cleanup()`,
+    );
 
     try {
       running = await startProduction(config);
+      expect(stderrOutput).toBe("");
+
+      await expect
+        .poll(
+          () => stderrOutput,
+          { timeout: 2_000, interval: 10 },
+        )
+        .toBe('{"operation":"cleanup_expired_handoffs","outcome":"failure"}\n');
+      expect(stderrOutput).not.toContain("sensitive cleanup failure");
 
       const health = await fetch(`http://127.0.0.1:${port}/health`);
       expect(health.status).toBe(200);
       await expect(health.json()).resolves.toEqual({ status: "ok" });
-
-      await expect
-        .poll(
-          async () => {
-            const result = await pool.query<{ count: number }>(
-              "SELECT count(*)::int AS count FROM handoffs WHERE space_id = $1 AND code = $2",
-              [expiredSpaceId, expiredCode],
-            );
-            return result.rows[0]!.count;
-          },
-          { timeout: 2_000, interval: 10 },
-        )
-        .toBe(0);
 
       const store = createHandoffStore(pool, RETENTION_WINDOW_MS);
       await expect(
@@ -99,6 +116,9 @@ describe.skipIf(skip)("Production expired Handoff cleanup wiring", () => {
       ).resolves.toMatchObject({ ok: true, code: liveCode, markdown: "# Live" });
     } finally {
       await running?.shutdown().catch(() => undefined);
+      stderrWrite.mockRestore();
+      await pool.query("DROP TRIGGER IF EXISTS taskdrop_test_reject_cleanup ON handoffs");
+      await pool.query("DROP FUNCTION IF EXISTS taskdrop_test_reject_cleanup()");
       await pool.query("DELETE FROM handoffs WHERE space_id = $1 OR space_id = $2", [
         liveSpaceId,
         expiredSpaceId,
