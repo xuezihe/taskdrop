@@ -21,6 +21,7 @@
     "prototype:p6": "pnpm build && node dist/prototypes/p6-dual-era-contract/runner.js",
     "prototype:setup-cli": "pnpm build && node dist/prototypes/p7-space-key-cli/cli.js",
     "setup:cli": "pnpm build && node dist/production/setup-cli.js",
+    "admin:cli": "pnpm build && node dist/production/admin-cli.js",
     "migrate": "pnpm build && node dist/production/migrate.js",
     "verify": "pnpm check && pnpm build && pnpm test"
   },
