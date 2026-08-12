@@ -56,6 +56,21 @@ describe.skipIf(skip)("Admin CLI", () => {
         [spaceId, markdown.liveA1, markdown.liveA2, markdown.liveB1, markdown.expired],
       );
     });
+    const expectedTimestamps = await pool.query<{
+      code: string;
+      revision_one_created_at: Date;
+      expires_at: Date;
+    }>(
+      `SELECT h.code,
+              min(r.created_at) FILTER (WHERE r.revision = 1) AS revision_one_created_at,
+              h.expires_at
+       FROM handoffs h
+       JOIN revisions r ON r.space_id = h.space_id AND r.handoff_code = h.code
+       WHERE h.space_id = $1
+       GROUP BY h.code, h.expires_at
+       ORDER BY h.code`,
+      [spaceId],
+    );
 
     let stdout = "";
     let stderr = "";
@@ -92,6 +107,13 @@ describe.skipIf(skip)("Admin CLI", () => {
       );
       expect(stdout.indexOf("LIVEA1")).toBeLessThan(stdout.indexOf("LIVEB1"));
       expect(stdout.indexOf("LIVEB1")).toBeLessThan(stdout.indexOf("DEAD01"));
+      for (const timestamp of expectedTimestamps.rows) {
+        const line = stdout.split("\n").find((candidate) => candidate.startsWith(timestamp.code));
+        expect(line).toContain(
+          `revision1CreatedAt=${timestamp.revision_one_created_at.toISOString()}`,
+        );
+        expect(line).toContain(`expiresAt=${timestamp.expires_at.toISOString()}`);
+      }
 
       const completeOutput = `${stdout}\n${stderr}`;
       expect(completeOutput).not.toContain(toHex(spaceId));
@@ -209,6 +231,16 @@ describe.skipIf(skip)("Admin CLI", () => {
     expect(emptyById.stdout).toContain(`Space Fingerprint: ${emptyFingerprint}`);
     expect(emptyById.stdout).toContain("Handoffs: live=0 expired=0 total=0");
     expect(emptyById.stdout).toContain("No stored Handoffs.");
+
+    const emptyByKey = await invoke(
+      ["inspect", "--space-key"],
+      DATABASE_URL!,
+      async () => emptyKey,
+    );
+    expect(emptyByKey.status).toBe(0);
+    expect(emptyByKey.stdout).toContain(`Space Fingerprint: ${emptyFingerprint}`);
+    expect(emptyByKey.stdout).toContain("Handoffs: live=0 expired=0 total=0");
+    expect(`${emptyByKey.stdout}${emptyByKey.stderr}`).not.toContain(emptyKey);
 
     const noMatch = await invoke(
       ["inspect", "--space-fingerprint", emptyFingerprint],

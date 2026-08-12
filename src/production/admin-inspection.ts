@@ -6,6 +6,7 @@ interface SpaceInspectionRow {
   code: string | null;
   latest_revision: number | null;
   expires_at: Date | null;
+  is_live: boolean | null;
   revision_count: number | null;
   revision_one_created_at: Date | null;
   markdown_bytes: string | null;
@@ -72,6 +73,7 @@ export async function inspectSpace(pool: Pool, spaceId: Uint8Array): Promise<Spa
        GROUP BY h.code, h.latest_revision, h.expires_at
      )
      SELECT clock.db_now, summary.code, summary.latest_revision, summary.expires_at,
+            summary.expires_at > clock.db_now AS is_live,
             summary.revision_count, summary.revision_one_created_at, summary.markdown_bytes
      FROM inspection_clock clock
      LEFT JOIN handoff_summaries summary ON true
@@ -86,6 +88,7 @@ export async function inspectSpace(pool: Pool, spaceId: Uint8Array): Promise<Spa
       row.code === null ||
       row.latest_revision === null ||
       row.expires_at === null ||
+      row.is_live === null ||
       row.revision_count === null ||
       row.revision_one_created_at === null ||
       row.markdown_bytes === null
@@ -94,7 +97,7 @@ export async function inspectSpace(pool: Pool, spaceId: Uint8Array): Promise<Spa
     }
     return [{
       code: row.code,
-      state: row.expires_at > databaseTime ? "live" : "expired",
+      state: row.is_live ? "live" : "expired",
       latestRevision: row.latest_revision,
       revisionCount: row.revision_count,
       revisionOneCreatedAt: row.revision_one_created_at.toISOString(),
