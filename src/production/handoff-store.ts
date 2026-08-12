@@ -10,6 +10,8 @@ const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const CODE_LENGTH = 6;
 const CODE_COLLISION_RETRIES = 5;
 
+export const EXPIRED_HANDOFF_CLEANUP_BATCH_SIZE = 100;
+
 export interface SpaceQuotaLimits {
   maxLiveHandoffs: number;
   maxRetainedMarkdownBytes: number;
@@ -58,6 +60,7 @@ export type CreateHandoffStoreResult = RevisionSnapshot | SpaceQuotaExceeded;
 export type GetHandoffStoreResult = RevisionSnapshot | HandoffNotFound;
 
 export interface HandoffStore {
+  cleanupExpiredHandoffs(): Promise<number>;
   createHandoff(input: {
     spaceId: Uint8Array;
     markdown: string;
@@ -160,6 +163,28 @@ export function createHandoffStore(
   quota: SpaceQuotaLimits = DEFAULT_SPACE_QUOTA,
 ): HandoffStore {
   return {
+    async cleanupExpiredHandoffs(): Promise<number> {
+      const result = await pool.query<{ deleted_handoffs: number }>(
+        `WITH expired_batch AS (
+           SELECT space_id, code
+           FROM handoffs
+           WHERE expires_at <= now()
+           ORDER BY expires_at, space_id, code
+           FOR UPDATE SKIP LOCKED
+           LIMIT ${EXPIRED_HANDOFF_CLEANUP_BATCH_SIZE}
+         ),
+         deleted AS (
+           DELETE FROM handoffs AS handoff
+           USING expired_batch
+           WHERE handoff.space_id = expired_batch.space_id
+             AND handoff.code = expired_batch.code
+           RETURNING handoff.space_id, handoff.code
+         )
+         SELECT count(*)::int AS deleted_handoffs FROM deleted`,
+      );
+      return result.rows[0]!.deleted_handoffs;
+    },
+
     async createHandoff({ spaceId, markdown, redactionCount }): Promise<CreateHandoffStoreResult> {
       let lastError: unknown;
       for (let attempt = 0; attempt < CODE_COLLISION_RETRIES; attempt++) {

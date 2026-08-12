@@ -2,6 +2,10 @@ import http, { type Server } from "node:http";
 
 import type { ProductionConfig } from "./config.js";
 import { createPool } from "./db.js";
+import {
+  startExpiredHandoffCleanup,
+  type CleanupObservation,
+} from "./expired-handoff-cleanup.js";
 import { createHandoffApplication } from "./handoff-application.js";
 import { createHandoffStore } from "./handoff-store.js";
 import { createMcpEndpoint } from "./mcp-endpoint.js";
@@ -76,11 +80,22 @@ export async function startProduction(config: ProductionConfig): Promise<Running
     });
   });
 
+  const observeCleanup = (observation: CleanupObservation): void => {
+    if (config.logLevel === "silent") return;
+    const destination = observation.outcome === "failure" ? process.stderr : process.stdout;
+    destination.write(`${JSON.stringify(observation)}\n`);
+  };
+  const cleanup = startExpiredHandoffCleanup({
+    cleanupPass: () => store.cleanupExpiredHandoffs(),
+    observe: observeCleanup,
+  });
+
   let shutdownPromise: Promise<void> | null = null;
   const shutdown = async (): Promise<void> => {
     if (shutdownPromise) return shutdownPromise;
     shutdownPromise = (async () => {
       shuttingDown = true;
+      const cleanupStopped = cleanup.stop();
       server.close();
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, SHUTDOWN_DRAIN_MS);
@@ -90,6 +105,7 @@ export async function startProduction(config: ProductionConfig): Promise<Running
         });
       });
       await mcpEndpoint.close();
+      await cleanupStopped;
       await pool.end();
     })();
     return shutdownPromise;
