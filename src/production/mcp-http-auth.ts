@@ -51,6 +51,7 @@ const MCP_HEADER_ALLOWLIST = [
   "accept",
   "mcp-protocol-version",
   "mcp-method",
+  "mcp-name",
   "mcp-session-id",
   "last-event-id",
 ] as const;
