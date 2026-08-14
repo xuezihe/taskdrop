@@ -33,6 +33,61 @@ export interface SpaceInspection {
   handoffs: InspectedHandoff[];
 }
 
+export interface DatabaseStats {
+  databaseTime: string;
+  spacesWithStoredHandoffs: number;
+  liveHandoffCount: number;
+  expiredHandoffCount: number;
+  totalHandoffCount: number;
+  totalRevisionCount: number;
+  liveMarkdownBytes: number;
+  totalMarkdownBytes: number;
+}
+
+interface DatabaseStatsRow {
+  db_now: Date;
+  spaces_with_stored_handoffs: number;
+  live_handoff_count: number;
+  expired_handoff_count: number;
+  total_handoff_count: number;
+  total_revision_count: number;
+  live_markdown_bytes: string;
+  total_markdown_bytes: string;
+}
+
+export async function loadDatabaseStats(pool: Pool): Promise<DatabaseStats> {
+  const result = await pool.query<DatabaseStatsRow>(
+    `WITH clock AS (
+       SELECT now() AS db_now
+     )
+     SELECT
+       clock.db_now,
+       (SELECT count(DISTINCT space_id)::int FROM handoffs) AS spaces_with_stored_handoffs,
+       (SELECT count(*)::int FROM handoffs WHERE expires_at > clock.db_now) AS live_handoff_count,
+       (SELECT count(*)::int FROM handoffs WHERE expires_at <= clock.db_now) AS expired_handoff_count,
+       (SELECT count(*)::int FROM handoffs) AS total_handoff_count,
+       (SELECT count(*)::int FROM revisions) AS total_revision_count,
+       (SELECT COALESCE(sum(octet_length(r.markdown)), 0)::bigint
+        FROM revisions r
+        JOIN handoffs h
+          ON h.space_id = r.space_id AND h.code = r.handoff_code
+        WHERE h.expires_at > clock.db_now) AS live_markdown_bytes,
+       (SELECT COALESCE(sum(octet_length(markdown)), 0)::bigint FROM revisions) AS total_markdown_bytes
+     FROM clock`,
+  );
+  const row = result.rows[0]!;
+  return {
+    databaseTime: row.db_now.toISOString(),
+    spacesWithStoredHandoffs: row.spaces_with_stored_handoffs,
+    liveHandoffCount: row.live_handoff_count,
+    expiredHandoffCount: row.expired_handoff_count,
+    totalHandoffCount: row.total_handoff_count,
+    totalRevisionCount: row.total_revision_count,
+    liveMarkdownBytes: Number(row.live_markdown_bytes),
+    totalMarkdownBytes: Number(row.total_markdown_bytes),
+  };
+}
+
 export type StoredFingerprintResolution =
   | { kind: "none" }
   | { kind: "unique"; spaceId: Uint8Array }

@@ -208,6 +208,7 @@ describe.skipIf(skip)("Admin CLI", () => {
       ["inspect", "--space-key", emptyKey],
       ["inspect", "--space-id", toHex(emptySpaceId), "--space-key"],
       ["inspect", "--space-id", "A".repeat(64)],
+      ["stats", "unexpected-arg"],
     ];
     for (const args of invalidInvocations) {
       const result = await invoke(args, "postgres://invalid-before-db");
@@ -317,6 +318,7 @@ describe.skipIf(skip)("Admin CLI", () => {
     for (const args of [
       ["inspect", "--space-id", "0".repeat(64)],
       ["cleanup-expired"],
+      ["stats"],
     ]) {
       let stdout = "";
       let stderr = "";
@@ -333,6 +335,124 @@ describe.skipIf(skip)("Admin CLI", () => {
       expect(stderr).toBe("admin command failed\n");
       expect(stderr).not.toContain("127.0.0.1");
       expect(stderr).not.toContain("ECONNREFUSED");
+    }
+  });
+
+  it("reports global database statistics with PostgreSQL time and bounded UTF-8 totals", async () => {
+    const spaceA = randomBytes(32);
+    const spaceB = randomBytes(32);
+    const markdown = {
+      liveA1: "机密界",
+      liveA2: "alpha-secret-content",
+      liveB1: "beta-secret",
+      expiredA: "[REDACTED fixture secret]",
+      liveGamma: "gamma",
+    };
+
+    const runStats = async () => {
+      let stdout = "";
+      let stderr = "";
+      const status = await runAdminCommand({
+        args: ["stats"],
+        databaseUrl: DATABASE_URL!,
+        readSpaceKey: async () => { throw new Error("Space Key input was not requested"); },
+        writeStdout: (text) => { stdout += text; },
+        writeStderr: (text) => { stderr += text; },
+      });
+      return { status, stdout, stderr };
+    };
+
+    const parseStatsOutput = (text: string) => {
+      const dbTimeMatch = text.match(/Database time: (\d{4}-\d{2}-\d{2}T[^\n]+)/);
+      const spacesMatch = text.match(/Spaces with stored Handoffs: (\d+)/);
+      const handoffsMatch = text.match(/Handoffs: live=(\d+) expired=(\d+) total=(\d+)/);
+      const revisionsMatch = text.match(/Revisions: total=(\d+)/);
+      const markdownMatch = text.match(/Markdown bytes: live=(\d+) total=(\d+)/);
+
+      expect(dbTimeMatch).not.toBeNull();
+      expect(spacesMatch).not.toBeNull();
+      expect(handoffsMatch).not.toBeNull();
+      expect(revisionsMatch).not.toBeNull();
+      expect(markdownMatch).not.toBeNull();
+
+      return {
+        databaseTime: new Date(dbTimeMatch![1]!),
+        spacesWithStoredHandoffs: Number(spacesMatch![1]),
+        liveHandoffs: Number(handoffsMatch![1]),
+        expiredHandoffs: Number(handoffsMatch![2]),
+        totalHandoffs: Number(handoffsMatch![3]),
+        totalRevisions: Number(revisionsMatch![1]),
+        liveMarkdownBytes: Number(markdownMatch![1]),
+        totalMarkdownBytes: Number(markdownMatch![2]),
+      };
+    };
+
+    const beforeStats = await runStats();
+    expect(beforeStats.status).toBe(0);
+    expect(beforeStats.stderr).toBe("");
+    const baseline = parseStatsOutput(beforeStats.stdout);
+
+    const clockBefore = (await pool.query<{ now: Date }>("SELECT now()")).rows[0]!.now;
+
+    await withTransaction(pool, async (client) => {
+      await client.query(
+        `INSERT INTO handoffs (space_id, code, latest_revision, expires_at)
+         VALUES ($1, 'LIVEA1', 2, now() + interval '1 hour'),
+                ($1, 'LIVEB1', 1, now() + interval '2 hours'),
+                ($1, 'DEAD01', 1, now() - interval '1 hour'),
+                ($2, 'LIVEG1', 1, now() + interval '1 hour')`,
+        [spaceA, spaceB],
+      );
+      await client.query(
+        `INSERT INTO revisions
+           (space_id, handoff_code, revision, markdown, created_at, redaction_count)
+         VALUES ($1, 'LIVEA1', 1, $3, now() - interval '3 hours', 0),
+                ($1, 'LIVEA1', 2, $4, now() - interval '2 hours', 0),
+                ($1, 'LIVEB1', 1, $5, now() - interval '1 hour', 0),
+                ($1, 'DEAD01', 1, $6, now() - interval '4 hours', 1),
+                ($2, 'LIVEG1', 1, $7, now() - interval '30 minutes', 0)`,
+        [spaceA, spaceB, markdown.liveA1, markdown.liveA2, markdown.liveB1, markdown.expiredA, markdown.liveGamma],
+      );
+    });
+
+    try {
+      const statsResult = await runStats();
+      const clockAfter = (await pool.query<{ now: Date }>("SELECT now()")).rows[0]!.now;
+
+      expect(statsResult.status).toBe(0);
+      expect(statsResult.stderr).toBe("");
+
+      const after = parseStatsOutput(statsResult.stdout);
+      expect(after.databaseTime.getTime()).toBeGreaterThanOrEqual(clockBefore.getTime());
+      expect(after.databaseTime.getTime()).toBeLessThanOrEqual(clockAfter.getTime());
+
+      expect(after.spacesWithStoredHandoffs - baseline.spacesWithStoredHandoffs).toBe(2);
+      expect(after.liveHandoffs - baseline.liveHandoffs).toBe(3);
+      expect(after.expiredHandoffs - baseline.expiredHandoffs).toBe(1);
+      expect(after.totalHandoffs - baseline.totalHandoffs).toBe(4);
+      expect(after.totalRevisions - baseline.totalRevisions).toBe(5);
+      expect(after.liveMarkdownBytes - baseline.liveMarkdownBytes).toBe(45);
+      expect(after.totalMarkdownBytes - baseline.totalMarkdownBytes).toBe(70);
+
+      const completeOutput = `${statsResult.stdout}\n${statsResult.stderr}`;
+      expect(completeOutput).not.toContain(toHex(spaceA));
+      expect(completeOutput).not.toContain(toHex(spaceB));
+      expect(completeOutput).not.toContain(DATABASE_URL!);
+      expect(completeOutput).not.toContain("LIVEA1");
+      expect(completeOutput).not.toContain("LIVEB1");
+      expect(completeOutput).not.toContain("DEAD01");
+      expect(completeOutput).not.toContain("LIVEG1");
+      for (const content of Object.values(markdown)) {
+        expect(completeOutput).not.toContain(content);
+      }
+
+      const rowsCount = await pool.query<{ count: number }>(
+        "SELECT count(*)::int FROM handoffs WHERE space_id = $1 OR space_id = $2",
+        [spaceA, spaceB],
+      );
+      expect(rowsCount.rows[0]!.count).toBe(4);
+    } finally {
+      await pool.query("DELETE FROM handoffs WHERE space_id = $1 OR space_id = $2", [spaceA, spaceB]);
     }
   });
 });

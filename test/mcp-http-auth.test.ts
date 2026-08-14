@@ -147,7 +147,13 @@ describe("MCP HTTP authentication boundary", () => {
       const body = JSON.stringify({ jsonrpc: "2.0", method: "tools/call", id: 1 });
       const exactEndpoint = await fetch(`${endpoint}/mcp?taskdropKey=${SPACE_KEY}`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: {
+          "content-type": "application/json",
+          "mcp-protocol-version": "2026-07-28",
+          "mcp-method": "tools/call",
+          "mcp-name": "get_handoff",
+          "x-untrusted-header": "must-not-cross-auth-boundary",
+        },
         body,
       });
       const trailingSlash = await fetch(`${endpoint}/mcp/?taskdropKey=${SPACE_KEY}`);
@@ -173,6 +179,10 @@ describe("MCP HTTP authentication boundary", () => {
       expect(requests).toHaveLength(1);
       expect(requests[0]?.url).toBe("/mcp");
       expect(requests[0]?.headers.authorization).toBeUndefined();
+      expect(requests[0]?.headers["mcp-protocol-version"]).toBe("2026-07-28");
+      expect(requests[0]?.headers["mcp-method"]).toBe("tools/call");
+      expect(requests[0]?.headers["mcp-name"]).toBe("get_handoff");
+      expect(requests[0]?.headers["x-untrusted-header"]).toBeUndefined();
       expect(bodies).toEqual([body]);
     });
   });

@@ -2,7 +2,9 @@ import { fileURLToPath } from "node:url";
 
 import {
   inspectSpace,
+  loadDatabaseStats,
   resolveStoredSpaceFingerprint,
+  type DatabaseStats,
   type SpaceInspection,
 } from "./admin-inspection.js";
 import { defaultRetentionWindowMs } from "./config.js";
@@ -23,6 +25,7 @@ const USAGE = `Usage:
   taskdrop admin inspect --space-id <64-char-lowercase-hex>
   taskdrop admin inspect --space-fingerprint <12-char-fingerprint>
   taskdrop admin cleanup-expired
+  taskdrop admin stats
 `;
 
 export interface AdminCommandInput {
@@ -35,6 +38,7 @@ export interface AdminCommandInput {
 
 type ParsedCommand =
   | { kind: "cleanup-expired" }
+  | { kind: "stats" }
   | { kind: "inspect-space-key" }
   | { kind: "inspect-space-id"; spaceId: Uint8Array }
   | { kind: "inspect-fingerprint"; fingerprint: string };
@@ -42,6 +46,9 @@ type ParsedCommand =
 function parseCommand(args: readonly string[]): ParsedCommand | null {
   if (args.length === 1 && args[0] === "cleanup-expired") {
     return { kind: "cleanup-expired" };
+  }
+  if (args.length === 1 && args[0] === "stats") {
+    return { kind: "stats" };
   }
   if (args.length === 2 && args[0] === "inspect" && args[1] === "--space-key") {
     return { kind: "inspect-space-key" };
@@ -64,13 +71,28 @@ function parseCommand(args: readonly string[]): ParsedCommand | null {
   return null;
 }
 
+interface AggregateSummary {
+  liveHandoffCount: number;
+  expiredHandoffCount: number;
+  totalHandoffCount: number;
+  totalRevisionCount: number;
+  liveMarkdownBytes: number;
+  totalMarkdownBytes: number;
+}
+
+function formatAggregateLines(summary: AggregateSummary): string[] {
+  return [
+    `Handoffs: live=${summary.liveHandoffCount} expired=${summary.expiredHandoffCount} total=${summary.totalHandoffCount}`,
+    `Revisions: total=${summary.totalRevisionCount}`,
+    `Markdown bytes: live=${summary.liveMarkdownBytes} total=${summary.totalMarkdownBytes}`,
+  ];
+}
+
 function formatInspection(fingerprint: string, inspection: SpaceInspection): string {
   const lines = [
     `Space Fingerprint: ${fingerprint}`,
     `Database time: ${inspection.databaseTime}`,
-    `Handoffs: live=${inspection.liveHandoffCount} expired=${inspection.expiredHandoffCount} total=${inspection.totalHandoffCount}`,
-    `Revisions: total=${inspection.totalRevisionCount}`,
-    `Markdown bytes: live=${inspection.liveMarkdownBytes} total=${inspection.totalMarkdownBytes}`,
+    ...formatAggregateLines(inspection),
   ];
   if (inspection.handoffs.length === 0) {
     lines.push("No stored Handoffs.");
@@ -83,6 +105,14 @@ function formatInspection(fingerprint: string, inspection: SpaceInspection): str
     }
   }
   return `${lines.join("\n")}\n`;
+}
+
+function formatStats(stats: DatabaseStats): string {
+  return [
+    `Database time: ${stats.databaseTime}`,
+    `Spaces with stored Handoffs: ${stats.spacesWithStoredHandoffs}`,
+    ...formatAggregateLines(stats),
+  ].join("\n") + "\n";
 }
 
 export async function runAdminCommand(input: AdminCommandInput): Promise<number> {
@@ -116,6 +146,11 @@ export async function runAdminCommand(input: AdminCommandInput): Promise<number>
 
   const pool = createPool(input.databaseUrl);
   try {
+    if (command.kind === "stats") {
+      const stats = await loadDatabaseStats(pool);
+      input.writeStdout(formatStats(stats));
+      return 0;
+    }
     if (command.kind === "cleanup-expired") {
       const store = createHandoffStore(pool, defaultRetentionWindowMs);
       const deletedHandoffs = await store.cleanupExpiredHandoffs();
