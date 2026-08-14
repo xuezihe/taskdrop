@@ -97,19 +97,18 @@ removed TaskDrop Space Key material; do not reveal or recover it.
 
 ## Report the result
 
-After a successful create, report the Handoff Code, new Revision, and expiry.
-Use the returned `markdown` to report its size in one short line: use characters
-for primarily CJK content, words for primarily whitespace-delimited content,
-and both when useful for mixed content. Label the count as approximate unless
-the host can determine it reliably. Present size only as an information-volume
-signal, not proof that the Handoff is complete, correct, or high quality. Count
-the returned Markdown after any Redaction; never count an earlier draft, call
-`get_handoff`, or place the Markdown in a temporary file, shell command, or log
-solely to count it. Tell the user to use the Code in the receiving AI.
+After a successful create or append, report the Handoff Code, new Revision,
+expiry, and whether TaskDrop created a Handoff or appended a Revision. Tell the
+user to use the Code in the receiving AI.
 
-After a successful append, report the Handoff Code, new Revision, expiry, and
-that TaskDrop appended a Revision. Tell the user to use the Code in the
-receiving AI.
+After a successful create, also use the returned `markdown` to report its size
+in one short line: use characters for primarily CJK content, words for primarily
+whitespace-delimited content, and both when useful for mixed content. Label the
+count as approximate unless the host can determine it reliably. Present size
+only as an information-volume signal, not proof that the Handoff is complete,
+correct, or high quality. Count the returned Markdown after any Redaction;
+never count an earlier draft, call `get_handoff`, or place the Markdown in a
+temporary file, shell command, or log solely to count it.
 
 After a successful get, report the Handoff Code, loaded Revision, expiry, and
 whether it is latest. Briefly summarize the actual Markdown: cover the current
