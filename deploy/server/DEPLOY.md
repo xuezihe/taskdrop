@@ -1,76 +1,76 @@
-# TaskDrop single-server deployment
+# TaskDrop single-server dogfood deployment
 
-This is the supported dogfood topology for one Debian VPS:
+This is the M3 deployment path exercised on one Debian VPS:
 
 ```text
-Internet -> Caddy on the host -> TaskDrop on 127.0.0.1:3000
-                                      |
-                                      v
-                            PostgreSQL in Docker
-                              on 127.0.0.1:5432
+Internet -> Cloudflare -> Caddy on the host -> TaskDrop on 127.0.0.1:3000
+                                                   |
+                                                   v
+                                         PostgreSQL in Docker
+                                           on 127.0.0.1:5432
+                                                   |
+                                                   v
+                                          named Docker volume
 ```
 
-TaskDrop runs as built JavaScript under systemd. PostgreSQL is the only
-containerized component. Caddy terminates HTTPS. The Application and database
-ports are not published on a public interface.
+TaskDrop runs as built JavaScript under `nohup`. PostgreSQL is the only
+containerized component. Caddy terminates HTTPS. Ports 3000 and 5432 stay on
+loopback. This is a private dogfood deployment: `nohup` does not provide boot
+startup, a dedicated service identity, or automatic crash recovery. Moving the
+Application to systemd is later deployment hardening, not part of this path.
 
-The commands below assume the deployment checkout is already present at
-`/opt/taskdrop/app`. Obtaining and selecting that checkout is outside this
-deployment guide.
+The commands assume a root shell and an existing `dev` checkout at
+`/root/Proj/taskDrop`. Replace `<TASKDROP_MCP_HOST>` with the MCP hostname. Do
+not paste real credentials into this guide, shell arguments, tickets, or chat.
 
-## 1. Prepare the host
+## 1. Prepare the host and DNS
 
-Point the deployment domain's DNS record at the VPS before starting Caddy.
-Ports 80 and 443 must reach Caddy; do not open ports 3000 or 5432 in the VPS or
-provider firewall.
+Install the following from their official Debian instructions:
 
-Install these host dependencies from their official Debian instructions:
-
-- system-wide Node.js 24, with `node` at `/usr/bin/node`
+- Node.js 24 at `/usr/bin/node`
 - pnpm 10.13.x
 - Docker Engine with the Compose plugin
-- Caddy's stable Debian package
+- Caddy
 - Git and OpenSSL
 
-Official installation references:
-
-- <https://nodejs.org/en/download>
-- <https://pnpm.io/installation>
-- <https://docs.docker.com/engine/install/debian/>
-- <https://caddyserver.com/docs/install#debian-ubuntu-raspbian>
-
-Confirm the installed tools before continuing:
+Confirm the environment:
 
 ```bash
+cd /root/Proj/taskDrop
+git branch --show-current
+git rev-parse HEAD
 node --version
 pnpm --version
+command -v node
+command -v pnpm
 docker --version
 docker compose version
 caddy version
-command -v node
 ```
 
-`node --version` must report Node.js 24, `pnpm --version` must report 10.13.x,
-and `command -v node` must report `/usr/bin/node` because the systemd unit below
-uses that fixed path.
+The branch must be `dev`, Node.js must be 24.x, pnpm must be 10.13.x, and Node
+must resolve to `/usr/bin/node` for the commands below.
 
-Create the service identity and directories:
+Create proxied Cloudflare DNS records for the MCP hostname. An IPv6-only origin
+can use a proxied `AAAA` record; Cloudflare supplies the public IPv4/IPv6 edge.
+Keep SSL/TLS at Full while Caddy obtains the origin certificate, then use Full
+(strict). For the MCP hostname:
 
-```bash
-sudo adduser --system --group --home /var/lib/taskdrop taskdrop
-sudo install -d -o taskdrop -g taskdrop -m 0750 /opt/taskdrop
-sudo install -d -o root -g taskdrop -m 0750 /etc/taskdrop
-sudo chown -R taskdrop:taskdrop /opt/taskdrop/app
-```
+- disable Browser Integrity Check and browser challenges;
+- bypass Cloudflare cache;
+- keep the DNS record proxied;
+- do not redirect `/mcp` to another hostname or path.
+
+The landing-page hostname may use different caching and browser-security rules.
 
 ## 2. Create protected environment files
 
-The following command generates one random hexadecimal database password inside
-the privileged shell, writes both environment files without printing the
-password, and does not place the generated value in shell history:
+Generate one URI-safe PostgreSQL password without printing it or placing the
+value in shell history:
 
 ```bash
-sudo sh -eu -c '
+install -d -o root -g root -m 0700 /etc/taskdrop
+sh -eu -c '
 umask 077
 password="$(openssl rand -hex 32)"
 printf "%s\n" \
@@ -84,205 +84,181 @@ printf "%s\n" \
   "RETENTION_WINDOW_MS=604800000" \
   "LOG_LEVEL=info" \
   > /etc/taskdrop/taskdrop.env
-chown root:root /etc/taskdrop/postgres.env
-chmod 0600 /etc/taskdrop/postgres.env
-chown root:taskdrop /etc/taskdrop/taskdrop.env
-chmod 0640 /etc/taskdrop/taskdrop.env
+chmod 0600 /etc/taskdrop/postgres.env /etc/taskdrop/taskdrop.env
 unset password
 '
 ```
 
-The examples beside this guide document the required names. Never copy their
-placeholder password into a running deployment. Do not print, paste into a
-command argument, or commit either real environment file.
+The example files beside this guide document the required names. Never use
+their placeholder password in a deployment. `RETENTION_WINDOW_MS=604800000`
+is seven days; Production accepts one hour through 30 days.
 
 ## 3. Start PostgreSQL
 
 From the repository root:
 
 ```bash
-sudo docker compose -f deploy/server/compose.yml up -d
-sudo docker compose -f deploy/server/compose.yml ps
+cd /root/Proj/taskDrop
+docker compose -f deploy/server/compose.yml up -d
+docker compose -f deploy/server/compose.yml ps
 ```
 
-Wait until `postgres` is healthy. The Compose file publishes PostgreSQL only on
-`127.0.0.1:5432` and keeps its data in the named
-`taskdrop_taskdrop-postgres-data` volume. `docker compose down` preserves that
-volume; do not use `down --volumes` on a deployment whose data must be retained.
+Wait for `postgres` to report healthy. The Compose file publishes PostgreSQL
+only on `127.0.0.1:5432` and stores data in the named
+`taskdrop_taskdrop-postgres-data` volume. `docker compose down` preserves the
+volume. Do not use `down --volumes` on retained data.
 
-## 4. Build and migrate
-
-Run installation and verification as the service identity:
+## 4. Install, verify, build, and migrate
 
 ```bash
-cd /opt/taskdrop/app
-sudo -u taskdrop pnpm install --frozen-lockfile
-sudo -u taskdrop pnpm verify
+cd /root/Proj/taskDrop
+pnpm install --frozen-lockfile
+pnpm verify
 ```
 
-Build output is plain JavaScript under `dist/`. Apply migrations explicitly
-before starting or restarting the Application:
+Apply migrations explicitly before first startup and before restarting an
+updated build:
 
 ```bash
-cd /opt/taskdrop/app
-sudo -u taskdrop sh -c '
+cd /root/Proj/taskDrop
 set -a
 . /etc/taskdrop/taskdrop.env
 set +a
-exec /usr/bin/node dist/production/migrate.js
-'
+/usr/bin/node dist/production/migrate.js
+unset DATABASE_URL PORT RETENTION_WINDOW_MS LOG_LEVEL
 ```
 
-If migration exits non-zero, stop the deployment here. Do not restart the
-Application. Application startup never applies schema changes automatically.
-
-## 5. Install the systemd unit
-
-Create `/etc/systemd/system/taskdrop.service` with this content:
-
-```systemd
-[Unit]
-Description=TaskDrop Application
-Wants=network-online.target
-After=network-online.target docker.service
-
-[Service]
-Type=simple
-User=taskdrop
-Group=taskdrop
-WorkingDirectory=/opt/taskdrop/app
-EnvironmentFile=/etc/taskdrop/taskdrop.env
-ExecStart=/usr/bin/node /opt/taskdrop/app/dist/production/main.js
-Restart=on-failure
-RestartSec=5s
-KillSignal=SIGTERM
-TimeoutStopSec=30s
-UMask=0077
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectHome=true
-ProtectSystem=strict
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Load and start it:
+Stop if migration exits non-zero. Application startup never modifies the
+schema automatically. Confirm the production entry points exist:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now taskdrop.service
-sudo systemctl status taskdrop.service
+test -f dist/production/main.js
+test -f dist/production/migrate.js
+test -f dist/production/admin-cli.js
 ```
 
-systemd sends `SIGTERM` when stopping the service. TaskDrop then stops accepting
-new work, stops cleanup scheduling, lets current work drain, and closes its
-PostgreSQL pool before the process exits.
+## 5. Start the Application with nohup
 
-## 6. Configure Caddy
-
-Replace `taskdrop.example.com` with the deployment domain, then put this site
-block in `/etc/caddy/Caddyfile`:
-
-```caddyfile
-{
-    log default {
-        exclude http.log.access http.log.error
-    }
-}
-
-taskdrop.example.com {
-    route {
-        @taskdrop path /mcp /health
-        reverse_proxy @taskdrop 127.0.0.1:3000
-        respond 404
-    }
-}
-```
-
-The two path matches are exact. Caddy forwards the original method, URI, query,
-body, and request headers to TaskDrop because this configuration performs no
-rewrite, redirect, header mutation, caching, or request-body limiting. All other
-public paths return 404 without reaching the Application.
-
-Do not add Caddy's `log` directive for this site and do not enable debug logging:
-MCP request URIs can carry a Space Key. The global logger exclusion also drops
-request-scoped HTTP error events, which can contain the URI when the upstream is
-unavailable. Caddy's service journal still retains non-request operational
-events such as startup, configuration, and certificate management.
-
-Validate and reload Caddy:
+Confirm no process already owns the Application port:
 
 ```bash
-sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-sudo systemctl reload caddy
-sudo systemctl status caddy
+ss -lntp | grep ':3000' || true
 ```
 
-Once DNS is effective, Caddy obtains and renews the HTTPS certificate
-automatically.
-
-## 7. Operate a release
-
-Health checks:
+Create the log directory, load the protected environment, and capture the PID
+from the same shell that starts Node:
 
 ```bash
-curl --fail --silent --show-error https://taskdrop.example.com/health
+install -d -o root -g root -m 0750 /var/log/taskdrop
+cd /root/Proj/taskDrop
+set -a
+. /etc/taskdrop/taskdrop.env
+set +a
+nohup /usr/bin/node dist/production/main.js \
+  >> /var/log/taskdrop/application.log \
+  2>&1 \
+  </dev/null &
+taskdrop_pid=$!
+printf '%s\n' "$taskdrop_pid" > /run/taskdrop-application.pid
+unset taskdrop_pid DATABASE_URL PORT RETENTION_WINDOW_MS LOG_LEVEL
+```
+
+Verify the process, listener, startup log, and loopback health:
+
+```bash
+cat /run/taskdrop-application.pid
+ps -fp "$(cat /run/taskdrop-application.pid)"
+ss -lntp | grep ':3000'
+tail -n 30 /var/log/taskdrop/application.log
 curl --fail --silent --show-error http://127.0.0.1:3000/health
 ```
 
-The result is `{"status":"ok"}` when PostgreSQL is reachable. A database
-failure returns HTTP 503 with `{"status":"unavailable"}` and no internal error
-details.
+Expected health body:
 
-Service lifecycle and retained logs:
+```json
+{"status":"ok"}
+```
+
+The first cleanup pass starts asynchronously after the listener is ready. A
+successful observation looks like this and contains no Handoff content:
+
+```json
+{"operation":"cleanup_expired_handoffs","deletedHandoffs":0,"durationMs":100}
+```
+
+## 6. Configure Caddy
+
+Add this site block to `/etc/caddy/Caddyfile`, replacing
+`<TASKDROP_MCP_HOST>`:
+
+```caddyfile
+<TASKDROP_MCP_HOST> {
+        route {
+                @taskdrop path /mcp /health
+                reverse_proxy @taskdrop 127.0.0.1:3000
+                respond 404
+        }
+}
+```
+
+The two path matches are exact. This block performs no rewrite or redirect, so
+the method, query, body, and Authorization header reach TaskDrop unchanged.
+Other paths return 404 without reaching the Application.
+
+Do not enable a Caddy access log or debug log for the MCP hostname. A Query
+carrier places the Space Key in the request URL. If the shared Caddy instance
+has request logging from another configuration, ensure the MCP host and
+request-scoped errors are excluded before using Query authentication.
+
+Validate and reload:
 
 ```bash
-sudo systemctl status taskdrop.service
-sudo systemctl restart taskdrop.service
-sudo systemctl stop taskdrop.service
-sudo systemctl start taskdrop.service
-sudo journalctl -u taskdrop.service --since today
-sudo journalctl -u caddy.service --since today
-sudo docker compose -f /opt/taskdrop/app/deploy/server/compose.yml logs postgres
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+systemctl reload caddy
+systemctl status caddy --no-pager
 ```
 
-Before restarting for an updated checkout, repeat dependency installation,
-`pnpm verify`, the build, and the explicit migration command from section 4.
-Migration failure must leave the currently running release untouched.
-
-Run the local-only Admin CLI with the same protected database environment:
+Verify public behavior:
 
 ```bash
-cd /opt/taskdrop/app
-sudo -u taskdrop sh -c '
-set -a
-. /etc/taskdrop/taskdrop.env
-set +a
-exec /usr/bin/node dist/production/admin-cli.js cleanup-expired
-'
+curl --fail --silent --show-error https://<TASKDROP_MCP_HOST>/health
+curl --silent --output /dev/null --write-out 'root: HTTP %{http_code}\n' \
+  https://<TASKDROP_MCP_HOST>/
 ```
 
-For inspection, replace the final command with one of:
+Health must return `{"status":"ok"}` and the MCP-host root must return 404.
+If normal CLI requests receive 403 while a browser succeeds, check Cloudflare
+Browser Integrity Check or challenge rules for this hostname.
 
-```text
-/usr/bin/node dist/production/admin-cli.js inspect --space-key
-/usr/bin/node dist/production/admin-cli.js inspect --space-id <64-character-lowercase-hex>
-/usr/bin/node dist/production/admin-cli.js inspect --space-fingerprint <12-character-fingerprint>
+## 7. Verify the deployment boundary
+
+On the VPS, both internal listeners must be loopback-only:
+
+```bash
+ss -lntp | grep ':3000'
+ss -lntp | grep ':5432'
+ss -lntp | grep -E ':(80|443)\b'
 ```
 
-`--space-key` reads the Space Key from standard input without putting it in the
-process arguments. Admin behavior is not routed through Caddy.
+From another machine, verify public HTTPS and confirm ports 3000 and 5432 are
+not reachable through the VPS public addresses. Never include a Space Key in a
+connectivity diagnostic shared with someone else.
 
-## 8. VPS acceptance record
+Configure clients using the generated Bearer field first. Verify
+create -> get latest -> append -> get latest, then send `SIGTERM` and restart
+the Application using the procedures in [RUNBOOK.md](./RUNBOOK.md). Read the
+same live Handoff again after restart.
 
-The real VPS smoke remains a user-run acceptance step. Record its date, deployed
-Git commit, Node/PostgreSQL/Caddy versions, and pass/fail for each Ticket 21
-check. Never record a Space Key, Handoff Code, Markdown, database URL,
-Authorization value, or complete client configuration.
+## 8. Record acceptance
 
-At minimum verify from outside the VPS that only HTTPS reaches TaskDrop, then
-exercise both credential carriers through exact `/mcp`, restart the Application
-and PostgreSQL independently, run Admin inspection and manual cleanup, observe
-one scheduled cleanup, and inspect retained Caddy, Application, and PostgreSQL
-logs for secret or Handoff content.
+Record only:
+
+- date and deployed Git commit;
+- Node.js, PostgreSQL, Docker, and Caddy versions;
+- pass/fail for migration, HTTPS, loopback isolation, both credential carriers,
+  Handoff restart persistence, Admin inspection, cleanup, database persistence,
+  and retained-log inspection.
+
+Never record a Space Key, Handoff Code, Markdown, database URL, Authorization
+value, or complete client configuration. Continue with the Operator acceptance
+commands in [RUNBOOK.md](./RUNBOOK.md).
