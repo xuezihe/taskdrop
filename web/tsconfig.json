@@ -2,16 +2,16 @@
   "compilerOptions": {
     "target": "ES2024",
     "lib": ["ES2024", "DOM"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "noEmit": true,
+    "types": ["vite/client"]
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "web/**/*.ts", "vitest.config.ts"],
-  "exclude": ["web/main.ts", "web/vite.config.ts", "web/vite-env.d.ts"]
+  "include": ["./**/*.ts"]
 }

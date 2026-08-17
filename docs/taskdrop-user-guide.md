@@ -34,6 +34,10 @@ access to the old Space.
 
 ## Configure an MCP client
 
+For current client-specific instructions for Codex, Claude Code, WorkBuddy,
+Cursor, Devin, and generic Streamable HTTP clients, see
+[Connect TaskDrop to an MCP client](./mcp-client-setup.md).
+
 Replace `<YOUR_TASKDROP_ORIGIN>` with the HTTPS origin supplied by the
 operator. Use the exact `/mcp` path without a trailing slash or redirect.
 

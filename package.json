@@ -10,7 +10,9 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json && cp -r src/production/migrations dist/production/migrations",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "build:web": "vite build --config web/vite.config.ts",
+    "dev:web": "vite --config web/vite.config.ts",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
     "test": "vitest run",
     "test:db": "vitest run --config vitest.db.config.ts",
     "test:watch": "vitest",
@@ -37,6 +39,7 @@
     "@types/node": "24.13.3",
     "@types/pg": "8.15.0",
     "typescript": "7.0.2",
+    "vite": "7.3.6",
     "vitest": "4.1.10"
   }
 }
