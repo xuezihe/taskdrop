@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveSpaceFingerprint, deriveSpaceId, formatSpaceKey, isCanonicalSpaceKey, parseSpaceId, parseSpaceKey } from "../src/production/space-identity.js";
+import {
+  deriveSpaceFingerprint,
+  deriveSpaceId,
+  formatSpaceKey,
+  isCanonicalSpaceKey,
+  parseSpaceId,
+  parseSpaceKey,
+} from "../src/production/space-identity.js";
 
 describe("space identity known-answer", () => {
   it("derives the exact Space ID for 32 zero bytes", async () => {

@@ -386,7 +386,9 @@ svg {
   cursor: pointer;
   font-size: 0.82rem;
   font-weight: 700;
-  transition: transform 160ms ease, background 160ms ease;
+  transition:
+    transform 160ms ease,
+    background 160ms ease;
 }
 
 .primary:hover {

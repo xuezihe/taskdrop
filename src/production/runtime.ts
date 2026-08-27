@@ -2,10 +2,7 @@ import http, { type Server } from "node:http";
 
 import type { ProductionConfig } from "./config.js";
 import { createPool } from "./db.js";
-import {
-  startExpiredHandoffCleanup,
-  type CleanupObservation,
-} from "./expired-handoff-cleanup.js";
+import { startExpiredHandoffCleanup, type CleanupObservation } from "./expired-handoff-cleanup.js";
 import { createHandoffApplication } from "./handoff-application.js";
 import { createHandoffStore } from "./handoff-store.js";
 import { createMcpEndpoint } from "./mcp-endpoint.js";
@@ -29,9 +26,8 @@ export async function startProduction(config: ProductionConfig): Promise<Running
   const store = createHandoffStore(pool, config.retentionWindowMs);
   const application = createHandoffApplication(store);
   const mcpEndpoint = createMcpEndpoint(application);
-  const authenticateMcp = createMcpHttpAuthenticationHandler(
-    (authentication, request, response) =>
-      mcpEndpoint.dispatch(authentication, request, response),
+  const authenticateMcp = createMcpHttpAuthenticationHandler((authentication, request, response) =>
+    mcpEndpoint.dispatch(authentication, request, response),
   );
 
   let shuttingDown = false;

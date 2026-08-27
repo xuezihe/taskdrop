@@ -1,0 +1,6 @@
+node_modules
+dist
+coverage
+.scratch
+memory-bank
+pnpm-lock.yaml

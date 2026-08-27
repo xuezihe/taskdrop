@@ -50,9 +50,7 @@ export class LifecycleRecorder {
     this.#stage = stage;
   }
 
-  record(
-    observation: Omit<LifecycleObservation, "sequence" | "stage">,
-  ): LifecycleObservation {
+  record(observation: Omit<LifecycleObservation, "sequence" | "stage">): LifecycleObservation {
     if (this.#stage === "tool-scan" && observation.rpcMethod === "tools/call") {
       this.#stage = "first-call";
     }

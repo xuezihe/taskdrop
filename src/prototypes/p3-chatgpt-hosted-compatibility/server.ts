@@ -25,10 +25,7 @@ import {
   type HandoffResult,
   type HandoffSnapshot,
 } from "../p2-minimum-handoff/handoff-service.js";
-import {
-  LifecycleRecorder,
-  type AuthenticationOutcome,
-} from "./lifecycle-recorder.js";
+import { LifecycleRecorder, type AuthenticationOutcome } from "./lifecycle-recorder.js";
 
 type AuthenticatedRequest = IncomingMessage & { auth?: AuthInfo };
 
@@ -94,9 +91,7 @@ export async function startP3Server(options: StartOptions): Promise<P3Server> {
       queryCredential: requestUrl.searchParams.get("taskdropKey") ?? undefined,
     });
 
-    const authentication: AuthenticationOutcome = credential.ok
-      ? "accepted"
-      : credential.reason;
+    const authentication: AuthenticationOutcome = credential.ok ? "accepted" : credential.reason;
     const requestState = {
       httpMethod: request.method ?? "UNKNOWN",
       path: "/mcp" as const,
@@ -248,7 +243,10 @@ function createHandoffServer(
   return server;
 }
 
-const handoffCodeSchema = z.string().length(6).regex(/^[0-9A-Z]+$/i);
+const handoffCodeSchema = z
+  .string()
+  .length(6)
+  .regex(/^[0-9A-Z]+$/i);
 
 const successSchema = z.object({
   ok: z.literal(true),
@@ -396,9 +394,7 @@ function readProtocolVersion(request: IncomingMessage, body: unknown): string {
   }
 
   const params = asRecord(asRecord(body)?.params);
-  return typeof params?.protocolVersion === "string"
-    ? params.protocolVersion
-    : "(not declared)";
+  return typeof params?.protocolVersion === "string" ? params.protocolVersion : "(not declared)";
 }
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

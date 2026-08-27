@@ -33,10 +33,7 @@ type PersistedAppendState = {
   revision_count: number;
 };
 
-async function readAppendStates(
-  pool: Pool,
-  spaceId: Uint8Array,
-): Promise<PersistedAppendState[]> {
+async function readAppendStates(pool: Pool, spaceId: Uint8Array): Promise<PersistedAppendState[]> {
   const result = await pool.query<PersistedAppendState>(
     `SELECT h.code, h.latest_revision, h.expires_at,
             count(r.revision)::int AS revision_count
@@ -414,9 +411,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
         getBackendPid(writerPoolA),
         getBackendPid(writerPoolB),
       ]);
-      const blockerPid = await blocker.query<{ pid: number }>(
-        "SELECT pg_backend_pid() AS pid",
-      );
+      const blockerPid = await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
 
       const initialState = await pool.query<{ revision_count: number }>(
         `SELECT count(*)::int AS revision_count
@@ -530,9 +525,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
          WHERE h.space_id = $1 AND h.code = $2`,
         [spaceId, created.code],
       );
-      expect(committedWriter.rows[0]!.handoff_xmin).toBe(
-        committedWriter.rows[0]!.revision_xmin,
-      );
+      expect(committedWriter.rows[0]!.handoff_xmin).toBe(committedWriter.rows[0]!.revision_xmin);
     } finally {
       try {
         if (blockerTransactionOpen) await blocker.query("ROLLBACK");
@@ -558,7 +551,10 @@ describe.skipIf(skip)("HandoffStore best-effort Space quota", () => {
 
   it("createHandoff rejects with SPACE_QUOTA_EXCEEDED (handoffs) when live Handoff count reaches limit", async () => {
     const spaceId = randomBytes(32);
-    const limits: SpaceQuotaLimits = { maxLiveHandoffs: 2, maxRetainedMarkdownBytes: 64 * 1024 * 1024 };
+    const limits: SpaceQuotaLimits = {
+      maxLiveHandoffs: 2,
+      maxRetainedMarkdownBytes: 64 * 1024 * 1024,
+    };
     const store = createHandoffStore(pool, RETENTION_WINDOW_MS, limits);
 
     const r1 = await store.createHandoff({ spaceId, markdown: "quota-h1", redactionCount: 0 });
@@ -590,7 +586,11 @@ describe.skipIf(skip)("HandoffStore best-effort Space quota", () => {
     const limits: SpaceQuotaLimits = { maxLiveHandoffs: 32, maxRetainedMarkdownBytes: 100 };
     const store = createHandoffStore(pool, RETENTION_WINDOW_MS, limits);
 
-    const created = await store.createHandoff({ spaceId, markdown: "A".repeat(60), redactionCount: 0 });
+    const created = await store.createHandoff({
+      spaceId,
+      markdown: "A".repeat(60),
+      redactionCount: 0,
+    });
     assertSnapshot(created);
 
     const appended = await store.appendRevision({
@@ -642,12 +642,23 @@ describe.skipIf(skip)("HandoffStore best-effort Space quota", () => {
 
   it("logically expired Handoffs do not count toward quota", async () => {
     const spaceId = randomBytes(32);
-    const limits: SpaceQuotaLimits = { maxLiveHandoffs: 2, maxRetainedMarkdownBytes: 64 * 1024 * 1024 };
+    const limits: SpaceQuotaLimits = {
+      maxLiveHandoffs: 2,
+      maxRetainedMarkdownBytes: 64 * 1024 * 1024,
+    };
     const store = createHandoffStore(pool, RETENTION_WINDOW_MS, limits);
 
-    const r1 = await store.createHandoff({ spaceId, markdown: "expiry-quota-h1", redactionCount: 0 });
+    const r1 = await store.createHandoff({
+      spaceId,
+      markdown: "expiry-quota-h1",
+      redactionCount: 0,
+    });
     assertSnapshot(r1);
-    const r2 = await store.createHandoff({ spaceId, markdown: "expiry-quota-h2", redactionCount: 0 });
+    const r2 = await store.createHandoff({
+      spaceId,
+      markdown: "expiry-quota-h2",
+      redactionCount: 0,
+    });
     assertSnapshot(r2);
 
     await pool.query(
@@ -655,7 +666,11 @@ describe.skipIf(skip)("HandoffStore best-effort Space quota", () => {
       [spaceId],
     );
 
-    const r3 = await store.createHandoff({ spaceId, markdown: "expiry-quota-h3", redactionCount: 0 });
+    const r3 = await store.createHandoff({
+      spaceId,
+      markdown: "expiry-quota-h3",
+      redactionCount: 0,
+    });
     expect(isSnapshot(r3)).toBe(true);
     assertSnapshot(r3);
     expect(r3.revision).toBe(1);

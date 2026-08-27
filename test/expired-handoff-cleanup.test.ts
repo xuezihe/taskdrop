@@ -100,9 +100,7 @@ describe("expired Handoff cleanup lifecycle", () => {
     });
 
     await vi.advanceTimersByTimeAsync(0);
-    expect(observations).toEqual([
-      { operation: "cleanup_expired_handoffs", outcome: "failure" },
-    ]);
+    expect(observations).toEqual([{ operation: "cleanup_expired_handoffs", outcome: "failure" }]);
     expect(JSON.stringify(observations)).not.toContain("sensitive");
 
     await vi.advanceTimersByTimeAsync(CLEANUP_INTERVAL_MS);

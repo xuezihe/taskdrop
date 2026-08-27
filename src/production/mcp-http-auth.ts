@@ -5,10 +5,7 @@ import type {
   ServerResponse,
 } from "node:http";
 
-import {
-  authenticateMcpCredential,
-  type AuthenticatedSpace,
-} from "./credential.js";
+import { authenticateMcpCredential, type AuthenticatedSpace } from "./credential.js";
 
 export type { AuthenticatedSpace } from "./credential.js";
 

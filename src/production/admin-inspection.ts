@@ -102,7 +102,7 @@ export async function resolveStoredSpaceFingerprint(
   );
   const matches: Uint8Array[] = [];
   for (const candidate of candidates.rows) {
-    if (await deriveSpaceFingerprint(candidate.space_id) === fingerprint) {
+    if ((await deriveSpaceFingerprint(candidate.space_id)) === fingerprint) {
       matches.push(candidate.space_id);
     }
   }
@@ -150,15 +150,17 @@ export async function inspectSpace(pool: Pool, spaceId: Uint8Array): Promise<Spa
     ) {
       return [];
     }
-    return [{
-      code: row.code,
-      state: row.is_live ? "live" : "expired",
-      latestRevision: row.latest_revision,
-      revisionCount: row.revision_count,
-      revisionOneCreatedAt: row.revision_one_created_at.toISOString(),
-      expiresAt: row.expires_at.toISOString(),
-      markdownBytes: Number(row.markdown_bytes),
-    }];
+    return [
+      {
+        code: row.code,
+        state: row.is_live ? "live" : "expired",
+        latestRevision: row.latest_revision,
+        revisionCount: row.revision_count,
+        revisionOneCreatedAt: row.revision_one_created_at.toISOString(),
+        expiresAt: row.expires_at.toISOString(),
+        markdownBytes: Number(row.markdown_bytes),
+      },
+    ];
   });
 
   const live = handoffs.filter((handoff) => handoff.state === "live");

@@ -75,11 +75,7 @@ async function main(): Promise<void> {
       const listed = await clients[version].listTools();
       const names = listed.map((tool) => readString(tool, "name")).sort();
       state.versions[version].tools = names;
-      check(
-        `${version} lists all tools`,
-        sameJson(names, REQUIRED_TOOLS),
-        names.join(", "),
-      );
+      check(`${version} lists all tools`, sameJson(names, REQUIRED_TOOLS), names.join(", "));
       toolContracts.set(version, canonicalToolContract(listed));
     }
 
@@ -240,7 +236,10 @@ abstract class ContractClient {
     };
   }
 
-  protected async request(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
+  protected async request(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
     return this.post({
       jsonrpc: "2.0",
       id: ++this.#nextId,
@@ -369,9 +368,7 @@ function render(): void {
       console.log(`Verdict: ${state.verdict}`);
       for (const version of [...LEGACY_VERSIONS, MODERN_VERSION] as Version[]) {
         const row = state.versions[version];
-        console.log(
-          `  ${version} era=${row.era} tools=${row.tools.join(", ") || "(pending)"}`,
-        );
+        console.log(`  ${version} era=${row.era} tools=${row.tools.join(", ") || "(pending)"}`);
       }
     }
     return;

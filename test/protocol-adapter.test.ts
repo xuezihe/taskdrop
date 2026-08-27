@@ -13,8 +13,7 @@ const unexpectedHandlerResult = {
   error: { code: "INTERNAL_ERROR", requestId: UNEXPECTED_HANDLER_REQUEST_ID },
 } as const satisfies ToolResult;
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 type JsonSchema = {
   anyOf?: JsonSchema[];
@@ -44,7 +43,7 @@ function outputVariants(value: unknown) {
   return variants.map((variant) => {
     const properties = asJsonSchema(variant).properties ?? {};
     const errorProperties = properties.error
-      ? asJsonSchema(properties.error).properties ?? {}
+      ? (asJsonSchema(properties.error).properties ?? {})
       : {};
 
     return {
@@ -236,26 +235,40 @@ describe("Production MCP protocol adapter", () => {
         createdAt: { type: "string", format: "date-time" },
         expiresAt: { type: "string", format: "date-time" },
       });
-      expect(errorProperties(byName.get("get_handoff")?.outputSchema, "HANDOFF_NOT_FOUND")).toMatchObject({
+      expect(
+        errorProperties(byName.get("get_handoff")?.outputSchema, "HANDOFF_NOT_FOUND"),
+      ).toMatchObject({
         handoffCode: { type: "string", pattern: "^[0-9A-HJKMNP-TV-Z]{6}$" },
       });
-      expect(errorProperties(byName.get("append_revision")?.outputSchema, "REVISION_CONFLICT")).toMatchObject({
+      expect(
+        errorProperties(byName.get("append_revision")?.outputSchema, "REVISION_CONFLICT"),
+      ).toMatchObject({
         expectedRevision: { type: "integer", exclusiveMinimum: 0 },
         receivedBaseRevision: { type: "integer", exclusiveMinimum: 0 },
       });
-      expect(errorProperties(byName.get("append_revision")?.outputSchema, "REVISION_LIMIT_REACHED")).toMatchObject({
+      expect(
+        errorProperties(byName.get("append_revision")?.outputSchema, "REVISION_LIMIT_REACHED"),
+      ).toMatchObject({
         limit: { type: "number", const: 25 },
       });
-      expect(errorProperties(byName.get("create_handoff")?.outputSchema, "SPACE_QUOTA_EXCEEDED")).toMatchObject({
+      expect(
+        errorProperties(byName.get("create_handoff")?.outputSchema, "SPACE_QUOTA_EXCEEDED"),
+      ).toMatchObject({
         quota: { type: "string", enum: ["handoffs", "retainedMarkdown"] },
       });
-      expect(errorProperties(byName.get("create_handoff")?.outputSchema, "CONTENT_TOO_LARGE")).toMatchObject({
+      expect(
+        errorProperties(byName.get("create_handoff")?.outputSchema, "CONTENT_TOO_LARGE"),
+      ).toMatchObject({
         limitBytes: { type: "number", const: 262144 },
       });
-      expect(errorProperties(byName.get("get_handoff")?.outputSchema, "RATE_LIMITED")).toMatchObject({
+      expect(
+        errorProperties(byName.get("get_handoff")?.outputSchema, "RATE_LIMITED"),
+      ).toMatchObject({
         retryAfterSeconds: { type: "integer", exclusiveMinimum: 0 },
       });
-      expect(errorProperties(byName.get("append_revision")?.outputSchema, "INTERNAL_ERROR")).toMatchObject({
+      expect(
+        errorProperties(byName.get("append_revision")?.outputSchema, "INTERNAL_ERROR"),
+      ).toMatchObject({
         requestId: { type: "string", format: "uuid" },
       });
     });
@@ -306,28 +319,25 @@ describe("Production MCP protocol adapter", () => {
         receivedBaseRevision: 2,
       },
     };
-    await withProtocolClient(
-      { appendRevision: async () => conflict },
-      async (client) => {
-        const result = await client.callTool({
-          name: "append_revision",
-          arguments: {
-            code: "7Q3K9F",
-            baseRevision: 2,
-            markdown: "# A competing revision",
-          },
-        });
+    await withProtocolClient({ appendRevision: async () => conflict }, async (client) => {
+      const result = await client.callTool({
+        name: "append_revision",
+        arguments: {
+          code: "7Q3K9F",
+          baseRevision: 2,
+          markdown: "# A competing revision",
+        },
+      });
 
-        expect(result.isError).toBe(true);
-        expect(result.structuredContent).toEqual(conflict);
-        expect(result.content).toEqual([
-          {
-            type: "text",
-            text: JSON.stringify(conflict),
-          },
-        ]);
-      },
-    );
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toEqual(conflict);
+      expect(result.content).toEqual([
+        {
+          type: "text",
+          text: JSON.stringify(conflict),
+        },
+      ]);
+    });
   });
 
   it("maps independent unexpected handler failures to opaque INTERNAL_ERROR results", async () => {
@@ -374,9 +384,11 @@ describe("Production MCP protocol adapter", () => {
           expect(JSON.stringify(result)).not.toContain(appendFailureMarker);
           expect(JSON.stringify(result)).not.toContain("private nested cause");
 
-          return (result.structuredContent as {
-            error: { requestId: string };
-          }).error.requestId;
+          return (
+            result.structuredContent as {
+              error: { requestId: string };
+            }
+          ).error.requestId;
         });
 
         expect(new Set(requestIds).size).toBe(2);

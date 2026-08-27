@@ -8,14 +8,8 @@ import {
 } from "@modelcontextprotocol/server";
 
 import type { HandoffApplication } from "./handoff-application.js";
-import type {
-  AuthenticatedSpace,
-  SanitizedMcpRequest,
-} from "./mcp-http-auth.js";
-import {
-  createProtocolServer,
-  type ProtocolToolHandlers,
-} from "./protocol-adapter.js";
+import type { AuthenticatedSpace, SanitizedMcpRequest } from "./mcp-http-auth.js";
+import { createProtocolServer, type ProtocolToolHandlers } from "./protocol-adapter.js";
 
 const AUTHENTICATED_TOKEN_PLACEHOLDER = "taskdrop-credential-removed";
 
@@ -29,10 +23,9 @@ export interface McpEndpoint {
 }
 
 export function createMcpEndpoint(application: HandoffApplication): McpEndpoint {
-  const handler = createMcpHandler(
-    (context) => createRequestProtocolServer(context, application),
-    { legacy: "stateless" },
-  );
+  const handler = createMcpHandler((context) => createRequestProtocolServer(context, application), {
+    legacy: "stateless",
+  });
   const nodeHandler = toNodeHandler(handler);
 
   return {
@@ -60,10 +53,7 @@ export function createMcpEndpoint(application: HandoffApplication): McpEndpoint 
   };
 }
 
-function createRequestProtocolServer(
-  context: McpRequestContext,
-  application: HandoffApplication,
-) {
+function createRequestProtocolServer(context: McpRequestContext, application: HandoffApplication) {
   const authentication = readAuthenticatedSpace(context.authInfo);
   const handlers: ProtocolToolHandlers = {
     createHandoff: ({ markdown }) =>

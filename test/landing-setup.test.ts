@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { formatSpaceKey, isCanonicalSpaceKey, parseSpaceKey } from "../src/production/space-identity.js";
+import {
+  formatSpaceKey,
+  isCanonicalSpaceKey,
+  parseSpaceKey,
+} from "../src/production/space-identity.js";
 import { createSpaceKey } from "../web/generate-space-key.js";
 import { LANGUAGE_STORAGE_KEY, resolveLanguage } from "../web/language.js";
 import { bearerMcpFields, queryMcpFields, queryCredentialUrl } from "../web/mcp-config.js";
@@ -91,7 +95,10 @@ describe("landing session", () => {
   });
 
   it("replaces Key and MCP-facing session state on regenerate", () => {
-    const regenerated = sessionAfterGenerate(sessionAfterCopy(sessionAfterGenerate(emptySession(), key)), other);
+    const regenerated = sessionAfterGenerate(
+      sessionAfterCopy(sessionAfterGenerate(emptySession(), key)),
+      other,
+    );
     expect(regenerated.spaceKey).toBe(other);
     expect(regenerated.copied).toBe(false);
     expect(shouldWarnBeforeUnload(regenerated)).toBe(true);

@@ -19,8 +19,7 @@ export type RedactionResult = RedactionSuccess | RedactionFailure;
 // 43-char body must not be followed by, another base64url character. This
 // prevents matching a canonical key embedded inside a longer base64url run.
 // Lookbehind/lookahead are supported on Node 24 (ES2024 target).
-const SPACE_KEY_CANDIDATE =
-  /(?<![A-Za-z0-9_-])tdp_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g;
+const SPACE_KEY_CANDIDATE = /(?<![A-Za-z0-9_-])tdp_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g;
 
 // Redacts every canonical TaskDrop Space Key in the input Markdown by
 // replacing it with a fixed placeholder and counting the replacements.

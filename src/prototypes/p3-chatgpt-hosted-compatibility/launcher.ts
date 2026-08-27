@@ -5,11 +5,7 @@
  */
 
 import { createHash, randomBytes } from "node:crypto";
-import {
-  spawn,
-  spawnSync,
-  type ChildProcessWithoutNullStreams,
-} from "node:child_process";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 
 import type { LifecycleStage } from "./lifecycle-recorder.js";
@@ -42,10 +38,7 @@ async function main(): Promise<void> {
   }
 
   const spaceKey = `tdp_${randomBytes(32).toString("base64url")}`;
-  expectedFingerprint = createHash("sha256")
-    .update(spaceKey)
-    .digest("base64url")
-    .slice(0, 12);
+  expectedFingerprint = createHash("sha256").update(spaceKey).digest("base64url").slice(0, 12);
 
   server = await startP3Server({
     port: PORT,
@@ -128,9 +121,7 @@ function cloudflaredEnvironment(): NodeJS.ProcessEnv {
   return environment;
 }
 
-async function waitForQuickTunnel(
-  child: ChildProcessWithoutNullStreams,
-): Promise<string> {
+async function waitForQuickTunnel(child: ChildProcessWithoutNullStreams): Promise<string> {
   return new Promise((resolve, reject) => {
     let settled = false;
     let buffered = "";
@@ -262,10 +253,7 @@ async function callTool(
   return result.structuredContent;
 }
 
-async function postRpc(
-  endpoint: string,
-  payload: Record<string, unknown>,
-): Promise<unknown> {
+async function postRpc(endpoint: string, payload: Record<string, unknown>): Promise<unknown> {
   const response = await fetch(endpoint, {
     method: "POST",
     redirect: "error",
@@ -373,13 +361,13 @@ function render(): void {
     );
   }
 
-  if (
-    statusChanged &&
-    preflight === "passed" &&
-    snapshot?.lifecycle.currentStage === "tool-scan"
-  ) {
-    console.log("[ready] Scan Tools now; the first ChatGPT tool call will enter first-call automatically.");
-    console.log("[commands] 3 later-call | 4 reopened | 5 refresh/reconnect | c clear clipboard | q quit");
+  if (statusChanged && preflight === "passed" && snapshot?.lifecycle.currentStage === "tool-scan") {
+    console.log(
+      "[ready] Scan Tools now; the first ChatGPT tool call will enter first-call automatically.",
+    );
+    console.log(
+      "[commands] 3 later-call | 4 reopened | 5 refresh/reconnect | c clear clipboard | q quit",
+    );
   }
 }
 

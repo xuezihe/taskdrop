@@ -132,7 +132,9 @@ describe("MCP HTTP authentication boundary", () => {
       );
 
       expect(rejectedResponses.map(({ status }) => status)).toEqual([401, 401, 401, 401]);
-      await expect(Promise.all(rejectedResponses.map((response) => response.text()))).resolves.toEqual([
+      await expect(
+        Promise.all(rejectedResponses.map((response) => response.text())),
+      ).resolves.toEqual([
         '{"error":"unauthorized"}',
         '{"error":"unauthorized"}',
         '{"error":"unauthorized"}',

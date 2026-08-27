@@ -30,10 +30,7 @@ import {
   type HandoffResult,
   type HandoffSnapshot,
 } from "../p2-minimum-handoff/handoff-service.js";
-import {
-  AcceptanceRecorder,
-  type AcceptanceStage,
-} from "./acceptance-recorder.js";
+import { AcceptanceRecorder, type AcceptanceStage } from "./acceptance-recorder.js";
 import { createSetupPage } from "./setup-page.js";
 
 const PORT = Number.parseInt(process.env.TASKDROP_P5_PORT ?? "4340", 10);
@@ -48,15 +45,12 @@ const recorder = new AcceptanceRecorder();
 let lastPrintedSequence = 0;
 let shuttingDown = false;
 
-const mcpHandler = createMcpHandler(
-  (context) => createHandoffServer(context),
-  {
-    legacy: "stateless",
-    onerror() {
-      console.error("[mcp] SDK error observed; sensitive details suppressed");
-    },
+const mcpHandler = createMcpHandler((context) => createHandoffServer(context), {
+  legacy: "stateless",
+  onerror() {
+    console.error("[mcp] SDK error observed; sensitive details suppressed");
   },
-);
+});
 
 const nodeMcpHandler = toNodeHandler(mcpHandler, {
   onerror() {
@@ -235,7 +229,10 @@ function createHandoffServer(context: McpRequestContext): McpServer {
   return server;
 }
 
-const handoffCodeSchema = z.string().length(6).regex(/^[0-9A-Z]+$/i);
+const handoffCodeSchema = z
+  .string()
+  .length(6)
+  .regex(/^[0-9A-Z]+$/i);
 
 const successSchema = z.object({
   ok: z.literal(true),
@@ -296,11 +293,7 @@ function readSanitizedAuth(authInfo: AuthInfo | undefined): {
   return { carrier, scopeHash: fingerprint };
 }
 
-function printHandoffResult(
-  tool: string,
-  scopeHash: string,
-  result: HandoffResult,
-): void {
+function printHandoffResult(tool: string, scopeHash: string, result: HandoffResult): void {
   if (result.ok) {
     console.log(
       `[handoff] stage=${recorder.stage} tool=${tool} scope=${scopeHash} code=${result.code} revision=${result.revision} latest=${result.latestRevision} markdownLength=${result.markdown.length} sanitized=${result.contentSanitized} redactions=${result.redactionCount}`,

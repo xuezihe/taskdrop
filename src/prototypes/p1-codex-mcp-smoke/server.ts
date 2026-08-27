@@ -21,10 +21,7 @@ import {
 } from "@modelcontextprotocol/node";
 import { z } from "zod";
 
-import {
-  resolveCredential,
-  type CredentialCarrier,
-} from "./credential-adapter.js";
+import { resolveCredential, type CredentialCarrier } from "./credential-adapter.js";
 
 const PORT = Number.parseInt(process.env.TASKDROP_P1_PORT ?? "4310", 10);
 const HOST = "127.0.0.1";
@@ -47,15 +44,12 @@ type Observation = {
 const observations: Observation[] = [];
 let requestSequence = 0;
 
-const mcpHandler = createMcpHandler(
-  (context) => createProbeServer(context),
-  {
-    legacy: "stateless",
-    onerror() {
-      renderState("SDK error observed; details suppressed to protect credentials");
-    },
+const mcpHandler = createMcpHandler((context) => createProbeServer(context), {
+  legacy: "stateless",
+  onerror() {
+    renderState("SDK error observed; details suppressed to protect credentials");
   },
-);
+});
 
 const nodeMcpHandler = toNodeHandler(mcpHandler, {
   onerror() {

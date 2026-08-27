@@ -24,11 +24,7 @@ import {
   resolveCredential,
   type CredentialCarrier,
 } from "../p1-codex-mcp-smoke/credential-adapter.js";
-import {
-  HandoffService,
-  type HandoffResult,
-  type HandoffSnapshot,
-} from "./handoff-service.js";
+import { HandoffService, type HandoffResult, type HandoffSnapshot } from "./handoff-service.js";
 
 const PORT = Number.parseInt(process.env.TASKDROP_P2_PORT ?? "4320", 10);
 const HOST = "127.0.0.1";
@@ -49,15 +45,12 @@ const service = new HandoffService();
 const operations: Operation[] = [];
 let operationSequence = 0;
 
-const mcpHandler = createMcpHandler(
-  (context) => createHandoffServer(context),
-  {
-    legacy: "stateless",
-    onerror() {
-      renderState("SDK error observed; details suppressed to protect credentials");
-    },
+const mcpHandler = createMcpHandler((context) => createHandoffServer(context), {
+  legacy: "stateless",
+  onerror() {
+    renderState("SDK error observed; details suppressed to protect credentials");
   },
-);
+});
 
 const nodeMcpHandler = toNodeHandler(mcpHandler, {
   onerror() {
@@ -191,7 +184,10 @@ function createHandoffServer(context: McpRequestContext): McpServer {
   return server;
 }
 
-const handoffCodeSchema = z.string().length(6).regex(/^[0-9A-Z]+$/i);
+const handoffCodeSchema = z
+  .string()
+  .length(6)
+  .regex(/^[0-9A-Z]+$/i);
 
 const successSchema = z.object({
   ok: z.literal(true),

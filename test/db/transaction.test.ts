@@ -31,10 +31,10 @@ describe.skipIf(skip)("pool and transaction helper", () => {
       );
     });
 
-    const result = await pool.query(
-      "SELECT code FROM handoffs WHERE space_id = $1 AND code = $2",
-      [spaceId, code],
-    );
+    const result = await pool.query("SELECT code FROM handoffs WHERE space_id = $1 AND code = $2", [
+      spaceId,
+      code,
+    ]);
     expect(result.rows).toHaveLength(1);
 
     await pool.query("DELETE FROM handoffs WHERE space_id = $1 AND code = $2", [spaceId, code]);
@@ -54,10 +54,10 @@ describe.skipIf(skip)("pool and transaction helper", () => {
       }),
     ).rejects.toThrow("deliberate failure");
 
-    const result = await pool.query(
-      "SELECT code FROM handoffs WHERE space_id = $1 AND code = $2",
-      [spaceId, code],
-    );
+    const result = await pool.query("SELECT code FROM handoffs WHERE space_id = $1 AND code = $2", [
+      spaceId,
+      code,
+    ]);
     expect(result.rows).toHaveLength(0);
   });
 });

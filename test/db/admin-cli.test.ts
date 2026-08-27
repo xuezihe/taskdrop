@@ -96,15 +96,9 @@ describe.skipIf(skip)("Admin CLI", () => {
       expect(stdout).toContain("Handoffs: live=2 expired=1 total=3");
       expect(stdout).toContain("Revisions: total=4");
       expect(stdout).toContain("Markdown bytes: live=40 total=65");
-      expect(stdout).toMatch(
-        /LIVEA1 \| live \| latest=2 \| revisions=2 .* markdownBytes=29/,
-      );
-      expect(stdout).toMatch(
-        /LIVEB1 \| live \| latest=1 \| revisions=1 .* markdownBytes=11/,
-      );
-      expect(stdout).toMatch(
-        /DEAD01 \| expired \| latest=1 \| revisions=1 .* markdownBytes=25/,
-      );
+      expect(stdout).toMatch(/LIVEA1 \| live \| latest=2 \| revisions=2 .* markdownBytes=29/);
+      expect(stdout).toMatch(/LIVEB1 \| live \| latest=1 \| revisions=1 .* markdownBytes=11/);
+      expect(stdout).toMatch(/DEAD01 \| expired \| latest=1 \| revisions=1 .* markdownBytes=25/);
       expect(stdout.indexOf("LIVEA1")).toBeLessThan(stdout.indexOf("LIVEB1"));
       expect(stdout.indexOf("LIVEB1")).toBeLessThan(stdout.indexOf("DEAD01"));
       for (const timestamp of expectedTimestamps.rows) {
@@ -151,21 +145,26 @@ describe.skipIf(skip)("Admin CLI", () => {
         args,
         databaseUrl: DATABASE_URL!,
         readSpaceKey,
-        writeStdout: (text) => { stdout += text; },
-        writeStderr: (text) => { stderr += text; },
+        writeStdout: (text) => {
+          stdout += text;
+        },
+        writeStderr: (text) => {
+          stderr += text;
+        },
       });
       return { status, stdout, stderr };
     };
 
     try {
       const byKey = await invoke(["inspect", "--space-key"], async () => spaceKey);
-      const byId = await invoke(
-        ["inspect", "--space-id", toHex(spaceId)],
-        async () => { throw new Error("Space Key input was not requested"); },
-      );
+      const byId = await invoke(["inspect", "--space-id", toHex(spaceId)], async () => {
+        throw new Error("Space Key input was not requested");
+      });
       const byFingerprint = await invoke(
         ["inspect", "--space-fingerprint", fingerprint],
-        async () => { throw new Error("Space Key input was not requested"); },
+        async () => {
+          throw new Error("Space Key input was not requested");
+        },
       );
 
       expect([byKey.status, byId.status, byFingerprint.status]).toEqual([0, 0, 0]);
@@ -196,8 +195,12 @@ describe.skipIf(skip)("Admin CLI", () => {
         args,
         databaseUrl,
         readSpaceKey,
-        writeStdout: (text) => { stdout += text; },
-        writeStderr: (text) => { stderr += text; },
+        writeStdout: (text) => {
+          stdout += text;
+        },
+        writeStderr: (text) => {
+          stderr += text;
+        },
       });
       return { status, stdout, stderr };
     };
@@ -224,10 +227,7 @@ describe.skipIf(skip)("Admin CLI", () => {
     expect(invalidKey.status).toBe(2);
     expect(invalidKey.stderr).toContain("invalid Space Key");
 
-    const emptyById = await invoke(
-      ["inspect", "--space-id", toHex(emptySpaceId)],
-      DATABASE_URL!,
-    );
+    const emptyById = await invoke(["inspect", "--space-id", toHex(emptySpaceId)], DATABASE_URL!);
     expect(emptyById.status).toBe(0);
     expect(emptyById.stdout).toContain(`Space Fingerprint: ${emptyFingerprint}`);
     expect(emptyById.stdout).toContain("Handoffs: live=0 expired=0 total=0");
@@ -288,9 +288,15 @@ describe.skipIf(skip)("Admin CLI", () => {
       const status = await runAdminCommand({
         args: ["cleanup-expired"],
         databaseUrl: DATABASE_URL!,
-        readSpaceKey: async () => { throw new Error("Space Key input was not requested"); },
-        writeStdout: (text) => { stdout += text; },
-        writeStderr: (text) => { stderr += text; },
+        readSpaceKey: async () => {
+          throw new Error("Space Key input was not requested");
+        },
+        writeStdout: (text) => {
+          stdout += text;
+        },
+        writeStderr: (text) => {
+          stderr += text;
+        },
       });
 
       expect(status).toBe(0);
@@ -325,9 +331,15 @@ describe.skipIf(skip)("Admin CLI", () => {
       const status = await runAdminCommand({
         args,
         databaseUrl: "postgres://127.0.0.1:1/unavailable?connect_timeout=1",
-        readSpaceKey: async () => { throw new Error("Space Key input was not requested"); },
-        writeStdout: (text) => { stdout += text; },
-        writeStderr: (text) => { stderr += text; },
+        readSpaceKey: async () => {
+          throw new Error("Space Key input was not requested");
+        },
+        writeStdout: (text) => {
+          stdout += text;
+        },
+        writeStderr: (text) => {
+          stderr += text;
+        },
       });
 
       expect(status).toBe(1);
@@ -355,9 +367,15 @@ describe.skipIf(skip)("Admin CLI", () => {
       const status = await runAdminCommand({
         args: ["stats"],
         databaseUrl: DATABASE_URL!,
-        readSpaceKey: async () => { throw new Error("Space Key input was not requested"); },
-        writeStdout: (text) => { stdout += text; },
-        writeStderr: (text) => { stderr += text; },
+        readSpaceKey: async () => {
+          throw new Error("Space Key input was not requested");
+        },
+        writeStdout: (text) => {
+          stdout += text;
+        },
+        writeStderr: (text) => {
+          stderr += text;
+        },
       });
       return { status, stdout, stderr };
     };
@@ -411,7 +429,15 @@ describe.skipIf(skip)("Admin CLI", () => {
                 ($1, 'LIVEB1', 1, $5, now() - interval '1 hour', 0),
                 ($1, 'DEAD01', 1, $6, now() - interval '4 hours', 1),
                 ($2, 'LIVEG1', 1, $7, now() - interval '30 minutes', 0)`,
-        [spaceA, spaceB, markdown.liveA1, markdown.liveA2, markdown.liveB1, markdown.expiredA, markdown.liveGamma],
+        [
+          spaceA,
+          spaceB,
+          markdown.liveA1,
+          markdown.liveA2,
+          markdown.liveB1,
+          markdown.expiredA,
+          markdown.liveGamma,
+        ],
       );
     });
 
@@ -452,7 +478,10 @@ describe.skipIf(skip)("Admin CLI", () => {
       );
       expect(rowsCount.rows[0]!.count).toBe(4);
     } finally {
-      await pool.query("DELETE FROM handoffs WHERE space_id = $1 OR space_id = $2", [spaceA, spaceB]);
+      await pool.query("DELETE FROM handoffs WHERE space_id = $1 OR space_id = $2", [
+        spaceA,
+        spaceB,
+      ]);
     }
   });
 });

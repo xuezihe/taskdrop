@@ -206,10 +206,9 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
     try {
       running = await startProduction(config);
       client = new Client({ name: "taskdrop-create-e2e", version: "0.0.0" });
-      const transport = new StreamableHTTPClientTransport(
-        new URL(`http://127.0.0.1:${port}/mcp`),
-        { authProvider: { token: async () => spaceKey } },
-      );
+      const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
+        authProvider: { token: async () => spaceKey },
+      });
       await client.connect(transport);
 
       const result = await client.callTool({
@@ -398,10 +397,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
       await running?.shutdown().catch(() => undefined);
       await restarted?.shutdown().catch(() => undefined);
       if (code) {
-        await pool.query("DELETE FROM handoffs WHERE space_id = $1 AND code = $2", [
-          spaceId,
-          code,
-        ]);
+        await pool.query("DELETE FROM handoffs WHERE space_id = $1 AND code = $2", [spaceId, code]);
       }
     }
   }, 25_000);
@@ -426,10 +422,9 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
     try {
       running = await startProduction(config);
       client = new Client({ name: "taskdrop-size-boundary-e2e", version: "0.0.0" });
-      const transport = new StreamableHTTPClientTransport(
-        new URL(`http://127.0.0.1:${port}/mcp`),
-        { authProvider: { token: async () => spaceKey } },
-      );
+      const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
+        authProvider: { token: async () => spaceKey },
+      });
       await client.connect(transport);
 
       const oversizedCreate = await client.callTool({
@@ -448,9 +443,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
            (SELECT count(*)::int FROM revisions WHERE space_id = $1) AS revision_count`,
         [spaceId],
       );
-      expect(countsAfterRejectedCreate.rows).toEqual([
-        { handoff_count: 0, revision_count: 0 },
-      ]);
+      expect(countsAfterRejectedCreate.rows).toEqual([{ handoff_count: 0, revision_count: 0 }]);
 
       const exactLimitCreate = await client.callTool({
         name: "create_handoff",
@@ -475,11 +468,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         { markdown: exactLimitMarkdown, markdown_bytes: 262_144 },
       ]);
 
-      const stateBeforeRejectedAppend = await readPersistedHandoffState(
-        pool,
-        spaceId,
-        code,
-      );
+      const stateBeforeRejectedAppend = await readPersistedHandoffState(pool, spaceId, code);
 
       const oversizedAppend = await client.callTool({
         name: "append_revision",
@@ -495,11 +484,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         error: { code: "CONTENT_TOO_LARGE", limitBytes: 262_144 },
       });
 
-      const stateAfterRejectedAppend = await readPersistedHandoffState(
-        pool,
-        spaceId,
-        code,
-      );
+      const stateAfterRejectedAppend = await readPersistedHandoffState(pool, spaceId, code);
       expect(stateAfterRejectedAppend).toEqual(stateBeforeRejectedAppend);
     } finally {
       await client?.close().catch(() => undefined);
@@ -525,10 +510,9 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
     try {
       running = await startProduction(config);
       client = new Client({ name: "taskdrop-revision-limit-e2e", version: "0.0.0" });
-      const transport = new StreamableHTTPClientTransport(
-        new URL(`http://127.0.0.1:${port}/mcp`),
-        { authProvider: { token: async () => spaceKey } },
-      );
+      const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
+        authProvider: { token: async () => spaceKey },
+      });
       await client.connect(transport);
 
       const created = await client.callTool({
@@ -553,9 +537,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
       );
 
       const stateBeforeLimit = await readPersistedHandoffState(pool, spaceId, code);
-      expect(stateBeforeLimit).toMatchObject([
-        { latest_revision: 25, revision_count: 25 },
-      ]);
+      expect(stateBeforeLimit).toMatchObject([{ latest_revision: 25, revision_count: 25 }]);
 
       const rejected = await client.callTool({
         name: "append_revision",
@@ -632,10 +614,9 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
 
       running = await startProduction(config);
       client = new Client({ name: "taskdrop-code-normalization-e2e", version: "0.0.0" });
-      const transport = new StreamableHTTPClientTransport(
-        new URL(`http://127.0.0.1:${port}/mcp`),
-        { authProvider: { token: async () => spaceKey } },
-      );
+      const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
+        authProvider: { token: async () => spaceKey },
+      });
       await client.connect(transport);
 
       const invalidU = await client.callTool({
@@ -682,9 +663,9 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
       });
 
       await expectInvisible();
-      expect(
-        await readAddressedHandoffState(pool, invisibleCode, spaceId, otherSpaceId),
-      ).toEqual([]);
+      expect(await readAddressedHandoffState(pool, invisibleCode, spaceId, otherSpaceId)).toEqual(
+        [],
+      );
 
       await insertHandoffFixture(pool, {
         spaceId: otherSpaceId,
@@ -698,9 +679,9 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         otherSpaceId,
       );
       await expectInvisible();
-      expect(
-        await readAddressedHandoffState(pool, invisibleCode, spaceId, otherSpaceId),
-      ).toEqual(crossSpaceBefore);
+      expect(await readAddressedHandoffState(pool, invisibleCode, spaceId, otherSpaceId)).toEqual(
+        crossSpaceBefore,
+      );
 
       await insertHandoffFixture(pool, {
         spaceId,
@@ -715,9 +696,9 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         otherSpaceId,
       );
       await expectInvisible();
-      expect(
-        await readAddressedHandoffState(pool, invisibleCode, spaceId, otherSpaceId),
-      ).toEqual(expiredBefore);
+      expect(await readAddressedHandoffState(pool, invisibleCode, spaceId, otherSpaceId)).toEqual(
+        expiredBefore,
+      );
     } finally {
       await client?.close().catch(() => undefined);
       await running?.shutdown().catch(() => undefined);

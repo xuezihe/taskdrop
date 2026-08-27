@@ -9,10 +9,7 @@ import {
 } from "./admin-inspection.js";
 import { defaultRetentionWindowMs } from "./config.js";
 import { createPool } from "./db.js";
-import {
-  createHandoffStore,
-  EXPIRED_HANDOFF_CLEANUP_BATCH_SIZE,
-} from "./handoff-store.js";
+import { createHandoffStore, EXPIRED_HANDOFF_CLEANUP_BATCH_SIZE } from "./handoff-store.js";
 import {
   deriveSpaceFingerprint,
   deriveSpaceId,
@@ -108,11 +105,13 @@ function formatInspection(fingerprint: string, inspection: SpaceInspection): str
 }
 
 function formatStats(stats: DatabaseStats): string {
-  return [
-    `Database time: ${stats.databaseTime}`,
-    `Spaces with stored Handoffs: ${stats.spacesWithStoredHandoffs}`,
-    ...formatAggregateLines(stats),
-  ].join("\n") + "\n";
+  return (
+    [
+      `Database time: ${stats.databaseTime}`,
+      `Spaces with stored Handoffs: ${stats.spacesWithStoredHandoffs}`,
+      ...formatAggregateLines(stats),
+    ].join("\n") + "\n"
+  );
 }
 
 export async function runAdminCommand(input: AdminCommandInput): Promise<number> {
@@ -156,9 +155,7 @@ export async function runAdminCommand(input: AdminCommandInput): Promise<number>
       const deletedHandoffs = await store.cleanupExpiredHandoffs();
       input.writeStdout(`Deleted expired Handoffs: ${deletedHandoffs}\n`);
       if (deletedHandoffs === EXPIRED_HANDOFF_CLEANUP_BATCH_SIZE) {
-        input.writeStdout(
-          "Expired Handoffs may remain; run cleanup-expired again.\n",
-        );
+        input.writeStdout("Expired Handoffs may remain; run cleanup-expired again.\n");
       }
       return 0;
     }

@@ -38,9 +38,7 @@ export class AcceptanceRecorder {
     this.#stage = stage;
   }
 
-  record(
-    observation: Omit<AcceptanceObservation, "sequence" | "stage">,
-  ): AcceptanceObservation {
+  record(observation: Omit<AcceptanceObservation, "sequence" | "stage">): AcceptanceObservation {
     const recorded = {
       sequence: ++this.#sequence,
       stage: this.#stage,

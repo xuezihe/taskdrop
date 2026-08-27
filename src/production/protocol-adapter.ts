@@ -3,12 +3,12 @@ import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
-import {
-  MAX_MARKDOWN_BYTES,
-  MAX_REVISIONS_PER_HANDOFF,
-} from "./handoff-limits.js";
+import { MAX_MARKDOWN_BYTES, MAX_REVISIONS_PER_HANDOFF } from "./handoff-limits.js";
 
-const HANDOFF_CODE_INPUT = z.string().length(6).regex(/^[0-9A-TV-Za-tv-z]{6}$/);
+const HANDOFF_CODE_INPUT = z
+  .string()
+  .length(6)
+  .regex(/^[0-9A-TV-Za-tv-z]{6}$/);
 const HANDOFF_CODE_OUTPUT = z.string().regex(/^[0-9A-HJKMNP-TV-Z]{6}$/);
 const POSITIVE_INTEGER = z.number().int().positive();
 
@@ -138,9 +138,7 @@ function encodeToolResult<Result extends ToolResult>(result: Result) {
   };
 }
 
-async function executeTool<Result extends ToolResult>(
-  operation: () => Promise<Result>,
-) {
+async function executeTool<Result extends ToolResult>(operation: () => Promise<Result>) {
   try {
     return encodeToolResult(await operation());
   } catch {

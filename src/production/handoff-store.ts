@@ -52,10 +52,7 @@ export type SpaceQuotaExceeded = Extract<
   HandoffStoreError,
   { error: { code: "SPACE_QUOTA_EXCEEDED" } }
 >;
-export type HandoffNotFound = Extract<
-  HandoffStoreError,
-  { error: { code: "HANDOFF_NOT_FOUND" } }
->;
+export type HandoffNotFound = Extract<HandoffStoreError, { error: { code: "HANDOFF_NOT_FOUND" } }>;
 export type CreateHandoffStoreResult = RevisionSnapshot | SpaceQuotaExceeded;
 export type GetHandoffStoreResult = RevisionSnapshot | HandoffNotFound;
 
@@ -104,10 +101,7 @@ function generateCode(): string {
   return out;
 }
 
-function toSnapshot(
-  handoff: HandoffRow,
-  revision: RevisionRow,
-): RevisionSnapshot {
+function toSnapshot(handoff: HandoffRow, revision: RevisionRow): RevisionSnapshot {
   return {
     ok: true,
     code: handoff.code,
@@ -194,9 +188,7 @@ export function createHandoffStore(
             const quotaError = await checkSpaceQuota(client, spaceId, quota, true);
             if (quotaError) return quotaError;
 
-            const now = await client.query<{ created_at: Date }>(
-              "SELECT now() AS created_at",
-            );
+            const now = await client.query<{ created_at: Date }>("SELECT now() AS created_at");
             const createdAt = now.rows[0]!.created_at;
             const expiresAt = new Date(createdAt.getTime() + retentionWindowMs);
 
@@ -219,9 +211,7 @@ export function createHandoffStore(
         } catch (err) {
           lastError = err;
           const isUniqueViolation =
-            err instanceof Error &&
-            "code" in err &&
-            (err as { code?: string }).code === "23505";
+            err instanceof Error && "code" in err && (err as { code?: string }).code === "23505";
           if (!isUniqueViolation) throw err;
         }
       }
@@ -251,7 +241,13 @@ export function createHandoffStore(
       return toSnapshot(row, row);
     },
 
-    async appendRevision({ spaceId, code, baseRevision, markdown, redactionCount }): Promise<HandoffStoreResult> {
+    async appendRevision({
+      spaceId,
+      code,
+      baseRevision,
+      markdown,
+      redactionCount,
+    }): Promise<HandoffStoreResult> {
       return withTransaction(pool, async (client) => {
         const handoffResult = await client.query<HandoffRow>(
           `SELECT code, latest_revision, expires_at
@@ -292,9 +288,7 @@ export function createHandoffStore(
         const quotaError = await checkSpaceQuota(client, spaceId, quota, false);
         if (quotaError) return quotaError;
 
-        const now = await client.query<{ created_at: Date }>(
-          "SELECT now() AS created_at",
-        );
+        const now = await client.query<{ created_at: Date }>("SELECT now() AS created_at");
         const createdAt = now.rows[0]!.created_at;
         const expiresAt = new Date(createdAt.getTime() + retentionWindowMs);
         const nextRevision = handoff.latest_revision + 1;
@@ -312,7 +306,12 @@ export function createHandoffStore(
 
         return toSnapshot(
           { code: handoff.code, latest_revision: nextRevision, expires_at: expiresAt },
-          { revision: nextRevision, markdown, redaction_count: redactionCount, created_at: createdAt },
+          {
+            revision: nextRevision,
+            markdown,
+            redaction_count: redactionCount,
+            created_at: createdAt,
+          },
         );
       });
     },

@@ -32,8 +32,5 @@ export function isCanonicalSpaceKey(value: string): boolean {
   const encoded = value.slice(SPACE_KEY_PREFIX.length);
   const decoded = Buffer.from(encoded, "base64url");
 
-  return (
-    decoded.byteLength === SPACE_KEY_BYTES &&
-    decoded.toString("base64url") === encoded
-  );
+  return decoded.byteLength === SPACE_KEY_BYTES && decoded.toString("base64url") === encoded;
 }

@@ -234,7 +234,10 @@ function createHandoffServer(
   return server;
 }
 
-const handoffCodeSchema = z.string().length(6).regex(/^[0-9A-Z]+$/i);
+const handoffCodeSchema = z
+  .string()
+  .length(6)
+  .regex(/^[0-9A-Z]+$/i);
 
 const successSchema = z.object({
   ok: z.literal(true),

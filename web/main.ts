@@ -1,13 +1,14 @@
 import { COPY, type Copy } from "./copy.js";
 import { createSpaceKey } from "./generate-space-key.js";
-import {
-  LANGUAGE_STORAGE_KEY,
-  type LandingLanguage,
-  resolveLanguage,
-} from "./language.js";
+import { LANGUAGE_STORAGE_KEY, type LandingLanguage, resolveLanguage } from "./language.js";
 import { bearerMcpFields, formatMcpSnippet, queryMcpFields } from "./mcp-config.js";
 import { resolveMcpOrigin } from "./mcp-origin.js";
-import { emptySession, sessionAfterCopy, sessionAfterGenerate, shouldWarnBeforeUnload } from "./session.js";
+import {
+  emptySession,
+  sessionAfterCopy,
+  sessionAfterGenerate,
+  shouldWarnBeforeUnload,
+} from "./session.js";
 
 const origin = resolveMcpOrigin(
   import.meta.env.TASKDROP_MCP_ORIGIN ?? import.meta.env.VITE_TASKDROP_MCP_ORIGIN,
@@ -81,9 +82,11 @@ function icon(name: "arrow" | "check" | "copy" | "github" | "key" | "spark"): st
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
     check: '<path d="m5 12 4 4L19 6"/>',
     copy: '<rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
-    github: '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.3-.4 6.8-1.6 6.8-7A5.4 5.4 0 0 0 19.4 4 5 5 0 0 0 19.2.5S18.1.1 15 1.8a13.4 13.4 0 0 0-7 0C4.9.1 3.8.5 3.8.5A5 5 0 0 0 3.6 4a5.4 5.4 0 0 0-1.4 3.7c0 5.3 3.5 6.5 6.8 6.9A4.8 4.8 0 0 0 7.5 18v4M7.5 19c-3 .9-3-1.5-4.2-2"/>',
+    github:
+      '<path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.3-.4 6.8-1.6 6.8-7A5.4 5.4 0 0 0 19.4 4 5 5 0 0 0 19.2.5S18.1.1 15 1.8a13.4 13.4 0 0 0-7 0C4.9.1 3.8.5 3.8.5A5 5 0 0 0 3.6 4a5.4 5.4 0 0 0-1.4 3.7c0 5.3 3.5 6.5 6.8 6.9A4.8 4.8 0 0 0 7.5 18v4M7.5 19c-3 .9-3-1.5-4.2-2"/>',
     key: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="m10.7 12.3 8-8M15 8l3 3M17 6l2 2"/>',
-    spark: '<path d="m12 3-1.2 4.1a5.2 5.2 0 0 1-3.6 3.6L3 12l4.2 1.3a5.2 5.2 0 0 1 3.6 3.6L12 21l1.2-4.1a5.2 5.2 0 0 1 3.6-3.6L21 12l-4.2-1.3a5.2 5.2 0 0 1-3.6-3.6L12 3Z"/>',
+    spark:
+      '<path d="m12 3-1.2 4.1a5.2 5.2 0 0 1-3.6 3.6L3 12l4.2 1.3a5.2 5.2 0 0 1 3.6 3.6L12 21l1.2-4.1a5.2 5.2 0 0 1 3.6-3.6L21 12l-4.2-1.3a5.2 5.2 0 0 1-3.6-3.6L12 3Z"/>',
   };
   return `<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths[name]}</svg>`;
 }
@@ -287,7 +290,8 @@ function render(): void {
   });
   root.querySelector("[data-action='copy-config']")?.addEventListener("click", () => {
     if (!session.spaceKey) return;
-    const snippet = activeConfig === "bearer" ? bearerSnippet(session.spaceKey) : querySnippet(session.spaceKey);
+    const snippet =
+      activeConfig === "bearer" ? bearerSnippet(session.spaceKey) : querySnippet(session.spaceKey);
     void copyText("config", snippet);
   });
 }

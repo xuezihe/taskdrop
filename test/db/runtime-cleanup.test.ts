@@ -99,10 +99,7 @@ describe.skipIf(skip)("Production expired Handoff cleanup wiring", () => {
       expect(stderrOutput).toBe("");
 
       await expect
-        .poll(
-          () => stderrOutput,
-          { timeout: 2_000, interval: 10 },
-        )
+        .poll(() => stderrOutput, { timeout: 2_000, interval: 10 })
         .toBe('{"operation":"cleanup_expired_handoffs","outcome":"failure"}\n');
       expect(stderrOutput).not.toContain("sensitive cleanup failure");
 

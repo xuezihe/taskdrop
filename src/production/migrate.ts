@@ -51,9 +51,7 @@ async function migrate(databaseUrl: string): Promise<void> {
     for (const file of pending) {
       await withTransaction(pool, async (client) => {
         await client.query(file.sql);
-        await client.query("INSERT INTO schema_migrations (version) VALUES ($1)", [
-          file.version,
-        ]);
+        await client.query("INSERT INTO schema_migrations (version) VALUES ($1)", [file.version]);
       });
       process.stdout.write(`applied: ${file.version}\n`);
     }
