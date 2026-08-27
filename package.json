@@ -27,7 +27,7 @@
     "setup:cli": "pnpm build && node dist/production/setup-cli.js",
     "admin:cli": "pnpm build && node dist/production/admin-cli.js",
     "migrate": "pnpm build && node dist/production/migrate.js",
-    "verify": "pnpm check && pnpm build && pnpm test"
+    "verify": "pnpm format:check && pnpm check && pnpm build && pnpm build:web && pnpm test"
   },
   "dependencies": {
     "@modelcontextprotocol/node": "2.0.0",
