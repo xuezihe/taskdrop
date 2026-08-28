@@ -6,13 +6,19 @@ import {
   setStoredSpaceKey,
   type WorkingDraftStorage,
 } from "./handoff-session-storage.js";
-import { createWorkingDraft, updateWorkingDraft, type WorkingDraft } from "./working-draft.js";
+import {
+  createWorkingDraft,
+  updateWorkingDraft,
+  type EditSurface,
+  type WorkingDraft,
+} from "./working-draft.js";
 import type {
   BrowserApiClient,
   BrowserApiError,
   BrowserClientError,
   BrowserClientResult,
   BrowserRevision,
+  BrowserRevisionHistory,
 } from "./browser-api-client.js";
 
 export type WorkspaceLocalError =
@@ -20,7 +26,9 @@ export type WorkspaceLocalError =
   | { code: "SPACE_KEY_STORAGE_ERROR" }
   | { code: "NO_WORKING_DRAFT" }
   | { code: "EMPTY_MARKDOWN" }
-  | { code: "DRAFT_STORAGE_ERROR" };
+  | { code: "DRAFT_STORAGE_ERROR" }
+  | { code: "WORKSPACE_NOT_READY" }
+  | { code: "COMMIT_IN_PROGRESS" };
 
 export type WorkspaceError = BrowserApiError | BrowserClientError | WorkspaceLocalError;
 
@@ -41,14 +49,22 @@ export type WorkspaceCommandResult =
   | { ok: true; value: BrowserRevision }
   | { ok: false; error: WorkspaceError };
 
+export type WorkspaceHistoryResult =
+  | { ok: true; value: BrowserRevisionHistory }
+  | { ok: false; error: WorkspaceError };
+
+export type WorkspaceUpdateResult = { ok: true } | { ok: false; error: WorkspaceError };
+
 export interface HandoffWorkspaceController {
   getState(): WorkspaceState;
   subscribe(listener: (state: WorkspaceState) => void): () => void;
   open(): Promise<void>;
   submitSpaceKey(spaceKey: string): Promise<void>;
-  updateMarkdown(markdown: string): void;
+  getRevisionHistory(signal?: AbortSignal): Promise<WorkspaceHistoryResult>;
+  readRevision(revision: number, signal?: AbortSignal): Promise<WorkspaceCommandResult>;
+  updateMarkdown(markdown: string, surface?: EditSurface): WorkspaceUpdateResult;
   discard(): void;
-  commit(): Promise<WorkspaceCommandResult>;
+  commit(signal?: AbortSignal): Promise<WorkspaceCommandResult>;
 }
 
 export interface HandoffWorkspaceControllerOptions {
@@ -156,10 +172,57 @@ export function createHandoffWorkspaceController(
       await loadWithSpaceKey(spaceKey);
     },
 
-    updateMarkdown(markdown: string): void {
-      if (state.kind !== "ready" || state.commitPending || !activeSpace) return;
+    async getRevisionHistory(signal?: AbortSignal): Promise<WorkspaceHistoryResult> {
+      if (state.kind !== "ready" || !activeSpace) {
+        return { ok: false, error: { code: "WORKSPACE_NOT_READY" } };
+      }
+      if (signal?.aborted) {
+        return { ok: false, error: { code: "REQUEST_CANCELLED" } };
+      }
+
+      const space = activeSpace;
+      let result;
+      try {
+        result = await space.client.getRevisionHistory(state.committed.code, signal);
+      } catch {
+        return { ok: false, error: { code: "NETWORK_ERROR" } };
+      }
+      if (activeSpace !== space || state.kind !== "ready") {
+        return { ok: false, error: { code: "WORKSPACE_NOT_READY" } };
+      }
+      return result.ok ? { ok: true, value: result } : result;
+    },
+
+    async readRevision(revision: number, signal?: AbortSignal): Promise<WorkspaceCommandResult> {
+      if (state.kind !== "ready" || !activeSpace) {
+        return { ok: false, error: { code: "WORKSPACE_NOT_READY" } };
+      }
+      if (signal?.aborted) {
+        return { ok: false, error: { code: "REQUEST_CANCELLED" } };
+      }
+
+      const space = activeSpace;
+      let result: BrowserClientResult;
+      try {
+        result = await space.client.readRevision(state.committed.code, revision, signal);
+      } catch {
+        return { ok: false, error: { code: "NETWORK_ERROR" } };
+      }
+      if (activeSpace !== space || state.kind !== "ready") {
+        return { ok: false, error: { code: "WORKSPACE_NOT_READY" } };
+      }
+      return result.ok ? { ok: true, value: result } : result;
+    },
+
+    updateMarkdown(markdown: string, surface: EditSurface = "human"): WorkspaceUpdateResult {
+      if (state.kind !== "ready" || !activeSpace) {
+        return { ok: false, error: { code: "WORKSPACE_NOT_READY" } };
+      }
+      if (state.commitPending) {
+        return { ok: false, error: { code: "COMMIT_IN_PROGRESS" } };
+      }
       const draft = state.workingDraft
-        ? updateWorkingDraft(state.workingDraft, markdown, "human", now())
+        ? updateWorkingDraft(state.workingDraft, markdown, surface, now())
         : createWorkingDraft(
             {
               code: state.committed.code,
@@ -167,7 +230,7 @@ export function createHandoffWorkspaceController(
               markdown: state.committed.markdown,
             },
             markdown,
-            "human",
+            surface,
             now(),
           );
       let actionError: WorkspaceError | null = null;
@@ -177,6 +240,7 @@ export function createHandoffWorkspaceController(
         actionError = { code: "DRAFT_STORAGE_ERROR" };
       }
       setState({ ...state, workingDraft: draft, actionError });
+      return actionError ? { ok: false, error: actionError } : { ok: true };
     },
 
     discard(): void {
@@ -189,12 +253,18 @@ export function createHandoffWorkspaceController(
       }
     },
 
-    async commit(): Promise<WorkspaceCommandResult> {
+    async commit(signal?: AbortSignal): Promise<WorkspaceCommandResult> {
       if (state.kind !== "ready" || !state.workingDraft || !activeSpace) {
         return { ok: false, error: { code: "NO_WORKING_DRAFT" } };
       }
+      if (state.commitPending) {
+        return { ok: false, error: { code: "COMMIT_IN_PROGRESS" } };
+      }
       if (state.workingDraft.markdown.length === 0) {
         return { ok: false, error: { code: "EMPTY_MARKDOWN" } };
+      }
+      if (signal?.aborted) {
+        return { ok: false, error: { code: "REQUEST_CANCELLED" } };
       }
 
       const draft = state.workingDraft;
@@ -204,12 +274,15 @@ export function createHandoffWorkspaceController(
 
       let result: BrowserClientResult;
       try {
-        result = await space.client.appendRevision({
-          code: committed.code,
-          baseRevision: draft.baseRevision,
-          markdown: draft.markdown,
-          origin: draft.lastModifiedVia,
-        });
+        result = await space.client.appendRevision(
+          {
+            code: committed.code,
+            baseRevision: draft.baseRevision,
+            markdown: draft.markdown,
+            origin: draft.lastModifiedVia,
+          },
+          signal,
+        );
       } catch {
         result = { ok: false, error: { code: "NETWORK_ERROR" } };
       }

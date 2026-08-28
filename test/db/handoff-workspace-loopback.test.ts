@@ -16,6 +16,7 @@ import {
 import { createBrowserApiClient } from "../../web/browser-api-client.js";
 import { createSessionWorkingDraftStorage } from "../../web/handoff-session-storage.js";
 import { createHandoffWorkspaceController } from "../../web/handoff-workspace-controller.js";
+import { createHandoffWebMcpTools, type HandoffWebMcpTool } from "../../web/webmcp-tools.js";
 
 const DATABASE_URL = process.env["DATABASE_URL"];
 const skip = !DATABASE_URL;
@@ -71,6 +72,16 @@ function closeServer(server: ReturnType<typeof createServer>): Promise<void> {
   return new Promise((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
   });
+}
+
+function webMcpTool(tools: readonly HandoffWebMcpTool[], name: string): HandoffWebMcpTool {
+  const selected = tools.find((tool) => tool.name === name);
+  if (!selected) throw new Error(`Expected ${name} to be registered`);
+  return selected;
+}
+
+function executeWebMcpTool(tool: HandoffWebMcpTool, input: unknown): Promise<unknown> {
+  return tool.execute(input, { signal: new AbortController().signal });
 }
 
 describe.skipIf(skip)("Human Workspace Browser API loopback", () => {
@@ -185,6 +196,102 @@ describe.skipIf(skip)("Human Workspace Browser API loopback", () => {
         kind: "ready",
         workingDraft: { markdown: "# Preserve after conflict", baseRevision: 2 },
       });
+    } finally {
+      await client?.close().catch(() => undefined);
+      await running?.shutdown().catch(() => undefined);
+      await pool.query("DELETE FROM handoffs WHERE space_id = $1", [spaceId]);
+    }
+  }, 25_000);
+
+  it("round-trips a Remote MCP Handoff through the shared WebMCP Draft and Commit", async () => {
+    const port = await reservePort();
+    const spaceKey = formatSpaceKey(randomBytes(32));
+    const spaceId = await deriveSpaceId(parseSpaceKey(spaceKey));
+    const config: ProductionConfig = {
+      port,
+      databaseUrl: DATABASE_URL!,
+      retentionWindowMs: RETENTION_WINDOW_MS,
+      logLevel: "silent",
+    };
+    let running: RunningServer | undefined;
+    let client: Client | undefined;
+
+    try {
+      running = await startProduction(config);
+      const endpoint = `http://${running.host}:${running.port}`;
+      client = new Client({ name: "taskdrop-webmcp-workspace-loopback", version: "0.0.0" });
+      const transport = new StreamableHTTPClientTransport(new URL(`${endpoint}/mcp`), {
+        authProvider: { token: async () => spaceKey },
+      });
+      await client.connect(transport);
+
+      const created = await client.callTool({
+        name: "create_handoff",
+        arguments: { markdown: "# Remote MCP Revision" },
+      });
+      const createdResult = created.structuredContent;
+      if (
+        typeof createdResult !== "object" ||
+        createdResult === null ||
+        !("ok" in createdResult) ||
+        createdResult.ok !== true ||
+        !("code" in createdResult) ||
+        typeof createdResult.code !== "string"
+      ) {
+        throw new Error("Expected Remote MCP to create the fixture Handoff");
+      }
+      const handoffCode = createdResult.code;
+
+      const storage = new MemoryStorage();
+      const request = (path: string, init?: RequestInit): Promise<Response> =>
+        fetch(`${endpoint}${path}`, init);
+      const controller = createHandoffWorkspaceController({
+        code: handoffCode,
+        sessionStorage: storage,
+        workingDraftStorage: createSessionWorkingDraftStorage(storage),
+        createClient: (key) => createBrowserApiClient(key, request),
+      });
+      await controller.submitSpaceKey(spaceKey);
+      const tools = createHandoffWebMcpTools(controller);
+
+      await expect(
+        executeWebMcpTool(webMcpTool(tools, "update_working_draft"), {
+          markdown: "# WebMCP Revision",
+        }),
+      ).resolves.toMatchObject({
+        code: handoffCode,
+        workingDraft: {
+          baseRevision: 1,
+          markdown: "# WebMCP Revision",
+          lastModifiedVia: "webmcp",
+        },
+      });
+      expect(controller.getState()).toMatchObject({
+        kind: "ready",
+        workingDraft: { markdown: "# WebMCP Revision", lastModifiedVia: "webmcp" },
+      });
+
+      await expect(
+        executeWebMcpTool(webMcpTool(tools, "commit_working_draft"), {}),
+      ).resolves.toMatchObject({
+        ok: true,
+        revision: 2,
+        markdown: "# WebMCP Revision",
+        origin: "webmcp",
+      });
+
+      const latest = await client.callTool({
+        name: "get_handoff",
+        arguments: { code: handoffCode },
+      });
+      expect(latest.structuredContent).toMatchObject({
+        ok: true,
+        revision: 2,
+        latestRevision: 2,
+        markdown: "# WebMCP Revision",
+        origin: "webmcp",
+      });
+      expect(controller.getState()).toMatchObject({ kind: "ready", workingDraft: null });
     } finally {
       await client?.close().catch(() => undefined);
       await running?.shutdown().catch(() => undefined);

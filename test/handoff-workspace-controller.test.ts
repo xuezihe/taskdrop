@@ -10,6 +10,7 @@ import type {
   BrowserApiClient,
   BrowserClientResult,
   BrowserRevision,
+  BrowserRevisionHistory,
 } from "../web/browser-api-client.js";
 import { createSessionWorkingDraftStorage } from "../web/handoff-session-storage.js";
 
@@ -73,6 +74,16 @@ function success(value: BrowserRevision): BrowserClientResult {
   return value;
 }
 
+function history(): BrowserRevisionHistory {
+  return {
+    ok: true,
+    code: "ABC001",
+    latestRevision: 1,
+    expiresAt: "2026-08-29T08:00:00.000Z",
+    revisions: [{ revision: 1, origin: "mcp", createdAt: "2026-08-28T08:00:00.000Z" }],
+  };
+}
+
 function fakeClient(
   current: BrowserClientResult,
   append: BrowserClientResult = revision({ revision: 2, latestRevision: 2, origin: "human" }),
@@ -80,6 +91,8 @@ function fakeClient(
 ): BrowserApiClient {
   return {
     getCurrent: async () => current,
+    getRevisionHistory: async () => history(),
+    readRevision: async () => current,
     appendRevision: async (input) => {
       observations.append = input;
       return append;
@@ -162,6 +175,8 @@ describe("Handoff Workspace controller", () => {
     let appendCalls = 0;
     const client: BrowserApiClient = {
       getCurrent: async () => revision(),
+      getRevisionHistory: async () => history(),
+      readRevision: async () => revision(),
       appendRevision: async () => {
         appendCalls += 1;
         return revision({ revision: 2 });
@@ -216,6 +231,40 @@ describe("Handoff Workspace controller", () => {
       workingDraft: { markdown: "# Keep after network failure", baseRevision: 1 },
       actionError: { code: "NETWORK_ERROR" },
     });
+  });
+
+  it("rejects a concurrent Commit while the first append is still pending", async () => {
+    const storage = new MemoryStorage();
+    let resolveAppend: ((result: BrowserClientResult) => void) | undefined;
+    const client: BrowserApiClient = {
+      getCurrent: async () => revision(),
+      getRevisionHistory: async () => history(),
+      readRevision: async () => revision(),
+      appendRevision: async () =>
+        new Promise((resolve) => {
+          resolveAppend = resolve;
+        }),
+    };
+    const controller = createController(storage, new Map([[SPACE_KEY, client]]));
+    await controller.submitSpaceKey(SPACE_KEY);
+    controller.updateMarkdown("# Commit once", "webmcp");
+
+    const firstCommit = controller.commit();
+    await expect(controller.commit()).resolves.toEqual({
+      ok: false,
+      error: { code: "COMMIT_IN_PROGRESS" },
+    });
+
+    if (!resolveAppend) throw new Error("Expected the first Commit to reach the Browser API");
+    resolveAppend(
+      revision({
+        revision: 2,
+        latestRevision: 2,
+        markdown: "# Commit once",
+        origin: "webmcp",
+      }),
+    );
+    await expect(firstCommit).resolves.toMatchObject({ ok: true, value: { revision: 2 } });
   });
 
   it("discards only the current Draft and restores the loaded committed Markdown", async () => {
@@ -281,6 +330,39 @@ describe("Handoff Workspace controller", () => {
     await secondController.submitSpaceKey(SPACE_KEY);
     expect(readyState(secondController).workingDraft).toMatchObject({
       markdown: "# Canonical key",
+    });
+  });
+
+  it("shares one Draft between WebMCP and Human while read commands remain read-only", async () => {
+    const storage = new MemoryStorage();
+    const controller = createController(
+      storage,
+      new Map([[SPACE_KEY, fakeClient(success(revision()))]]),
+    );
+
+    await controller.submitSpaceKey(SPACE_KEY);
+    await expect(controller.getRevisionHistory()).resolves.toEqual({
+      ok: true,
+      value: history(),
+    });
+    await expect(controller.readRevision(1)).resolves.toEqual({
+      ok: true,
+      value: revision(),
+    });
+    expect(readyState(controller).workingDraft).toBeNull();
+
+    expect(controller.updateMarkdown("# Agent update", "webmcp")).toEqual({ ok: true });
+    expect(readyState(controller).workingDraft).toMatchObject({
+      markdown: "# Agent update",
+      lastModifiedVia: "webmcp",
+      contributors: ["webmcp"],
+    });
+
+    expect(controller.updateMarkdown("# Human follow-up")).toEqual({ ok: true });
+    expect(readyState(controller).workingDraft).toMatchObject({
+      markdown: "# Human follow-up",
+      lastModifiedVia: "human",
+      contributors: ["webmcp", "human"],
     });
   });
 });

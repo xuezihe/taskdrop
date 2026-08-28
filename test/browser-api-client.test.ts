@@ -75,6 +75,38 @@ describe("Browser API client", () => {
     });
   });
 
+  it("loads Revision history and a historical Revision through relative same-origin URLs", async () => {
+    const requests: Array<{ path: string; init: RequestInit | undefined }> = [];
+    const history = {
+      ok: true as const,
+      code: "ABC001",
+      latestRevision: 2,
+      expiresAt: "2026-08-29T08:00:00.000Z",
+      revisions: [
+        { revision: 2, origin: "human" as const, createdAt: "2026-08-28T09:00:00.000Z" },
+        { revision: 1, origin: "mcp" as const, createdAt: "2026-08-28T08:00:00.000Z" },
+      ],
+    };
+    const request: BrowserRequest = async (path, init) => {
+      requests.push({ path, init });
+      return response(path.endsWith("/revisions") ? history : revision);
+    };
+    const client = createBrowserApiClient(SPACE_KEY, request);
+    const signal = new AbortController().signal;
+
+    await expect(client.getRevisionHistory("ABC001", signal)).resolves.toEqual(history);
+    await expect(client.readRevision("ABC001", 1, signal)).resolves.toEqual(revision);
+
+    expect(requests.map(({ path }) => path)).toEqual([
+      "/api/handoffs/ABC001/revisions",
+      "/api/handoffs/ABC001/revisions/1",
+    ]);
+    for (const { init } of requests) {
+      expect(init?.signal).toBe(signal);
+      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${SPACE_KEY}`);
+    }
+  });
+
   it("returns structured domain errors from non-2xx responses", async () => {
     const request: BrowserRequest = async () =>
       response(
@@ -115,6 +147,20 @@ describe("Browser API client", () => {
     await expect(invalidClient.getCurrent("ABC001")).resolves.toEqual({
       ok: false,
       error: { code: "INVALID_RESPONSE" },
+    });
+  });
+
+  it("distinguishes cancellation from an ordinary network failure", async () => {
+    const controller = new AbortController();
+    const client = createBrowserApiClient(SPACE_KEY, async (_path, init) => {
+      init?.signal?.throwIfAborted();
+      throw new Error("request failed");
+    });
+    controller.abort();
+
+    await expect(client.getRevisionHistory("ABC001", controller.signal)).resolves.toEqual({
+      ok: false,
+      error: { code: "REQUEST_CANCELLED" },
     });
   });
 });

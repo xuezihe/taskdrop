@@ -6,6 +6,7 @@ import {
   type WorkspaceState,
 } from "./handoff-workspace-controller.js";
 import { createSessionWorkingDraftStorage } from "./handoff-session-storage.js";
+import { bindHandoffWebMcpTools } from "./webmcp-registration.js";
 
 export async function mountHandoffWorkspace(root: HTMLElement, routeCode: string): Promise<void> {
   let sessionStorage: Storage;
@@ -24,6 +25,8 @@ export async function mountHandoffWorkspace(root: HTMLElement, routeCode: string
   });
   const view = createView(root, controller, routeCode);
   controller.subscribe(view.render);
+  const webMcpBinding = bindHandoffWebMcpTools(controller);
+  window.addEventListener("pagehide", () => webMcpBinding.dispose(), { once: true });
   view.render(controller.getState());
   await controller.open();
 }
@@ -184,6 +187,12 @@ function describeError(error: WorkspaceError): string {
       return "The Working Draft is empty. Add Markdown before committing.";
     case "DRAFT_STORAGE_ERROR":
       return "The browser could not save the Working Draft in this session.";
+    case "WORKSPACE_NOT_READY":
+      return "Open the Handoff before editing or reading its Workspace.";
+    case "COMMIT_IN_PROGRESS":
+      return "Wait for the current Commit to finish before editing.";
+    case "REQUEST_CANCELLED":
+      return "The Handoff request was cancelled. Your local Draft is preserved.";
     case "NETWORK_ERROR":
       return "The Handoff service could not be reached. Your local Draft is preserved.";
     case "INVALID_RESPONSE":
