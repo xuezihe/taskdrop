@@ -30,8 +30,8 @@ async function insertExpiredHandoffs(
   );
   await pool.query(
     `INSERT INTO revisions
-       (space_id, handoff_code, revision, markdown, created_at, redaction_count)
-     SELECT $1, lpad(n::text, 6, '0'), 1, 'expired fixture', now() - interval '2 hours', 0
+       (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin)
+     SELECT $1, lpad(n::text, 6, '0'), 1, 'expired fixture', now() - interval '2 hours', 0, 'mcp'
      FROM generate_series(1, $2::int) AS fixture(n)`,
     [spaceId, count],
   );
@@ -64,6 +64,7 @@ describe.skipIf(skip)("expired Handoff cleanup", () => {
       spaceId: liveSpaceId,
       markdown: "# Live r1",
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(live);
     const liveR2 = await store.appendRevision({
@@ -72,6 +73,7 @@ describe.skipIf(skip)("expired Handoff cleanup", () => {
       baseRevision: 1,
       markdown: "# Live r2",
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(liveR2);
     await pool.query(
@@ -83,6 +85,7 @@ describe.skipIf(skip)("expired Handoff cleanup", () => {
       spaceId: expiredSpaceId,
       markdown: "# Expired r1",
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(expired);
     const expiredR2 = await store.appendRevision({
@@ -91,6 +94,7 @@ describe.skipIf(skip)("expired Handoff cleanup", () => {
       baseRevision: 1,
       markdown: "# Expired r2",
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(expiredR2);
     await pool.query(

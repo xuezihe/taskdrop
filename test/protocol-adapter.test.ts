@@ -184,6 +184,7 @@ describe("Production MCP protocol adapter", () => {
           "latestRevision",
           "markdown",
           "ok",
+          "origin",
           "redactionCount",
           "revision",
         ],
@@ -232,6 +233,7 @@ describe("Production MCP protocol adapter", () => {
         markdown: { type: "string" },
         contentSanitized: { type: "boolean" },
         redactionCount: { type: "integer", minimum: 0 },
+        origin: { type: "string", enum: ["mcp", "human", "webmcp"] },
         createdAt: { type: "string", format: "date-time" },
         expiresAt: { type: "string", format: "date-time" },
       });
@@ -284,6 +286,7 @@ describe("Production MCP protocol adapter", () => {
       markdown: "# Current handoff",
       contentSanitized: false,
       redactionCount: 0,
+      origin: "mcp" as const,
       createdAt: "2026-08-07T08:00:00Z",
       expiresAt: "2026-08-14T08:00:00Z",
     };

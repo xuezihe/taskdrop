@@ -101,6 +101,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
       spaceId,
       markdown: md1,
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(created);
     expect(created.ok).toBe(true);
@@ -143,6 +144,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
       baseRevision: 1,
       markdown: md2,
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(appended);
     expect(appended.code).toBe(created.code);
@@ -186,12 +188,61 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
     expect(r2.createdAt).toBe(appended.createdAt);
   });
 
+  it("preserves distinct create and append origins through every read", async () => {
+    const spaceId = randomBytes(32);
+
+    const created = await store.createHandoff({
+      spaceId,
+      markdown: "# Created by human",
+      redactionCount: 0,
+      origin: "human",
+    });
+    assertSnapshot(created);
+    expect(created.origin).toBe("human");
+
+    const first = await store.getHandoff({
+      spaceId,
+      code: created.code,
+      revision: 1,
+    });
+    assertSnapshot(first);
+    expect(first.origin).toBe("human");
+
+    const appended = await store.appendRevision({
+      spaceId,
+      code: created.code,
+      baseRevision: 1,
+      markdown: "# Appended by WebMCP",
+      redactionCount: 0,
+      origin: "webmcp",
+    });
+    assertSnapshot(appended);
+    expect(appended.origin).toBe("webmcp");
+
+    const latest = await store.getHandoff({
+      spaceId,
+      code: created.code,
+      revision: "latest",
+    });
+    assertSnapshot(latest);
+    expect(latest.origin).toBe("webmcp");
+
+    const historical = await store.getHandoff({
+      spaceId,
+      code: created.code,
+      revision: 1,
+    });
+    assertSnapshot(historical);
+    expect(historical.origin).toBe("human");
+  });
+
   it("stale append returns REVISION_CONFLICT with no mutation and no expiry refresh", async () => {
     const spaceId = randomBytes(32);
     const created = await store.createHandoff({
       spaceId,
       markdown: "stale-base r1",
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(created);
 
@@ -201,6 +252,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
       baseRevision: 1,
       markdown: "stale-base r2",
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(appended);
     expect(appended.revision).toBe(2);
@@ -217,6 +269,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
       baseRevision: 1,
       markdown: "stale-base r3 should not exist",
       redactionCount: 0,
+      origin: "mcp",
     });
     expect(isSnapshot(stale)).toBe(false);
     expect(stale).toEqual({
@@ -254,6 +307,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
       spaceId,
       markdown: "not-found r1",
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(created);
 
@@ -298,6 +352,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
       baseRevision: 1,
       markdown: "should not append to expired",
       redactionCount: 0,
+      origin: "mcp",
     });
     expect(expiredAppend).toEqual({
       ok: false,
@@ -310,6 +365,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
       baseRevision: 1,
       markdown: "should not append to unknown",
       redactionCount: 0,
+      origin: "mcp",
     });
     expect(appendUnknown).toEqual({
       ok: false,
@@ -323,6 +379,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
       spaceId,
       markdown: "expiry r1",
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(created);
 
@@ -353,6 +410,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
       baseRevision: 1,
       markdown: "expiry r2",
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(appended);
 
@@ -376,6 +434,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
       baseRevision: 1,
       markdown: "expiry stale",
       redactionCount: 0,
+      origin: "mcp",
     });
     expect(isSnapshot(stale)).toBe(false);
 
@@ -404,6 +463,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
         spaceId,
         markdown: originalMarkdown,
         redactionCount: 0,
+        origin: "mcp",
       });
       assertSnapshot(created);
 
@@ -438,6 +498,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
           baseRevision: 1,
           markdown: markdownA,
           redactionCount: 0,
+          origin: "mcp",
         }),
         writerB.appendRevision({
           spaceId,
@@ -445,6 +506,7 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
           baseRevision: 1,
           markdown: markdownB,
           redactionCount: 0,
+          origin: "mcp",
         }),
       ];
 
@@ -557,12 +619,27 @@ describe.skipIf(skip)("HandoffStore best-effort Space quota", () => {
     };
     const store = createHandoffStore(pool, RETENTION_WINDOW_MS, limits);
 
-    const r1 = await store.createHandoff({ spaceId, markdown: "quota-h1", redactionCount: 0 });
+    const r1 = await store.createHandoff({
+      spaceId,
+      markdown: "quota-h1",
+      redactionCount: 0,
+      origin: "mcp",
+    });
     assertSnapshot(r1);
-    const r2 = await store.createHandoff({ spaceId, markdown: "quota-h2", redactionCount: 0 });
+    const r2 = await store.createHandoff({
+      spaceId,
+      markdown: "quota-h2",
+      redactionCount: 0,
+      origin: "mcp",
+    });
     assertSnapshot(r2);
 
-    const r3 = await store.createHandoff({ spaceId, markdown: "quota-h3", redactionCount: 0 });
+    const r3 = await store.createHandoff({
+      spaceId,
+      markdown: "quota-h3",
+      redactionCount: 0,
+      origin: "mcp",
+    });
     expect(r3).toEqual({
       ok: false,
       error: { code: "SPACE_QUOTA_EXCEEDED", quota: "handoffs" },
@@ -590,6 +667,7 @@ describe.skipIf(skip)("HandoffStore best-effort Space quota", () => {
       spaceId,
       markdown: "A".repeat(60),
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(created);
 
@@ -599,6 +677,7 @@ describe.skipIf(skip)("HandoffStore best-effort Space quota", () => {
       baseRevision: 1,
       markdown: "B".repeat(50),
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(appended);
     expect(appended.revision).toBe(2);
@@ -615,6 +694,7 @@ describe.skipIf(skip)("HandoffStore best-effort Space quota", () => {
       baseRevision: 2,
       markdown: "C".repeat(40),
       redactionCount: 0,
+      origin: "mcp",
     });
     expect(rejected).toEqual({
       ok: false,
@@ -652,12 +732,14 @@ describe.skipIf(skip)("HandoffStore best-effort Space quota", () => {
       spaceId,
       markdown: "expiry-quota-h1",
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(r1);
     const r2 = await store.createHandoff({
       spaceId,
       markdown: "expiry-quota-h2",
       redactionCount: 0,
+      origin: "mcp",
     });
     assertSnapshot(r2);
 
@@ -670,6 +752,7 @@ describe.skipIf(skip)("HandoffStore best-effort Space quota", () => {
       spaceId,
       markdown: "expiry-quota-h3",
       redactionCount: 0,
+      origin: "mcp",
     });
     expect(isSnapshot(r3)).toBe(true);
     assertSnapshot(r3);
@@ -741,8 +824,8 @@ describe.skipIf(skip)("HandoffStore best-effort Space quota", () => {
           );
           await client.query(
             `INSERT INTO revisions
-               (space_id, handoff_code, revision, markdown, created_at, redaction_count)
-             SELECT $1, $2, revision, '# Revision ' || revision, now(), 0
+               (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin)
+             SELECT $1, $2, revision, '# Revision ' || revision, now(), 0, 'mcp'
              FROM generate_series(1, $3) AS revision`,
             [spaceId, testCase.code, testCase.latestRevision],
           );
@@ -759,6 +842,7 @@ describe.skipIf(skip)("HandoffStore best-effort Space quota", () => {
           baseRevision: testCase.baseRevision,
           markdown: "# This Revision must not be stored",
           redactionCount: 0,
+          origin: "mcp",
         });
         expect(result).toEqual(testCase.expected);
         expect(await readAppendStates(pool, spaceId)).toEqual(stateBefore);

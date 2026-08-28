@@ -71,9 +71,9 @@ describe.skipIf(skip)("Production expired Handoff cleanup wiring", () => {
       );
       await client.query(
         `INSERT INTO revisions
-           (space_id, handoff_code, revision, markdown, created_at, redaction_count)
-         VALUES ($1, $2, 1, '# Live', now(), 0),
-                ($3, $4, 1, '# Expired', now() - interval '2 hours', 0)`,
+           (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin)
+         VALUES ($1, $2, 1, '# Live', now(), 0, 'mcp'),
+                ($3, $4, 1, '# Expired', now() - interval '2 hours', 0, 'mcp')`,
         [liveSpaceId, liveCode, expiredSpaceId, expiredCode],
       );
     });

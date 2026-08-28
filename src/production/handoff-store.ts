@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import type { Pool, PoolClient } from "./db.js";
 import { withTransaction } from "./db.js";
 import { MAX_REVISIONS_PER_HANDOFF } from "./handoff-limits.js";
+import type { RevisionOrigin } from "./revision-origin.js";
 
 // Crockford Base32 excludes I, L, O, U so generated codes survive input normalization.
 // O -> 0, I -> 1, L -> 1 defined by the Tool Contract.
@@ -31,6 +32,7 @@ export interface RevisionSnapshot {
   markdown: string;
   contentSanitized: boolean;
   redactionCount: number;
+  origin: RevisionOrigin;
   createdAt: string;
   expiresAt: string;
 }
@@ -62,6 +64,7 @@ export interface HandoffStore {
     spaceId: Uint8Array;
     markdown: string;
     redactionCount: number;
+    origin: RevisionOrigin;
   }): Promise<CreateHandoffStoreResult>;
   getHandoff(input: {
     spaceId: Uint8Array;
@@ -74,6 +77,7 @@ export interface HandoffStore {
     baseRevision: number;
     markdown: string;
     redactionCount: number;
+    origin: RevisionOrigin;
   }): Promise<HandoffStoreResult>;
 }
 
@@ -81,6 +85,7 @@ interface RevisionRow {
   revision: number;
   markdown: string;
   redaction_count: number;
+  origin: RevisionOrigin;
   created_at: Date;
 }
 
@@ -111,6 +116,7 @@ function toSnapshot(handoff: HandoffRow, revision: RevisionRow): RevisionSnapsho
     markdown: revision.markdown,
     contentSanitized: revision.redaction_count > 0,
     redactionCount: revision.redaction_count,
+    origin: revision.origin,
     createdAt: revision.created_at.toISOString(),
     expiresAt: handoff.expires_at.toISOString(),
   };
@@ -179,7 +185,12 @@ export function createHandoffStore(
       return result.rows[0]!.deleted_handoffs;
     },
 
-    async createHandoff({ spaceId, markdown, redactionCount }): Promise<CreateHandoffStoreResult> {
+    async createHandoff({
+      spaceId,
+      markdown,
+      redactionCount,
+      origin,
+    }): Promise<CreateHandoffStoreResult> {
       let lastError: unknown;
       for (let attempt = 0; attempt < CODE_COLLISION_RETRIES; attempt++) {
         const code = generateCode();
@@ -198,14 +209,21 @@ export function createHandoffStore(
               [spaceId, code, expiresAt],
             );
             await client.query(
-              `INSERT INTO revisions (space_id, handoff_code, revision, markdown, created_at, redaction_count)
-               VALUES ($1, $2, 1, $3, $4, $5)`,
-              [spaceId, code, markdown, createdAt, redactionCount],
+              `INSERT INTO revisions
+                 (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin)
+               VALUES ($1, $2, 1, $3, $4, $5, $6)`,
+              [spaceId, code, markdown, createdAt, redactionCount, origin],
             );
 
             return toSnapshot(
               { code, latest_revision: 1, expires_at: expiresAt },
-              { revision: 1, markdown, redaction_count: redactionCount, created_at: createdAt },
+              {
+                revision: 1,
+                markdown,
+                redaction_count: redactionCount,
+                origin,
+                created_at: createdAt,
+              },
             );
           });
         } catch (err) {
@@ -222,7 +240,7 @@ export function createHandoffStore(
       const targetRevision = revision === "latest" ? null : revision;
       const result = await pool.query<RevisionSnapshotRow>(
         `SELECT h.code, h.latest_revision, h.expires_at,
-                r.revision, r.markdown, r.redaction_count, r.created_at
+                r.revision, r.markdown, r.redaction_count, r.origin, r.created_at
          FROM handoffs h
          JOIN revisions r
            ON r.space_id = h.space_id
@@ -247,6 +265,7 @@ export function createHandoffStore(
       baseRevision,
       markdown,
       redactionCount,
+      origin,
     }): Promise<HandoffStoreResult> {
       return withTransaction(pool, async (client) => {
         const handoffResult = await client.query<HandoffRow>(
@@ -294,9 +313,10 @@ export function createHandoffStore(
         const nextRevision = handoff.latest_revision + 1;
 
         await client.query(
-          `INSERT INTO revisions (space_id, handoff_code, revision, markdown, created_at, redaction_count)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [spaceId, code, nextRevision, markdown, createdAt, redactionCount],
+          `INSERT INTO revisions
+             (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          [spaceId, code, nextRevision, markdown, createdAt, redactionCount, origin],
         );
         await client.query(
           `UPDATE handoffs SET latest_revision = $3, expires_at = $4
@@ -310,6 +330,7 @@ export function createHandoffStore(
             revision: nextRevision,
             markdown,
             redaction_count: redactionCount,
+            origin,
             created_at: createdAt,
           },
         );

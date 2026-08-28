@@ -33,7 +33,7 @@ describe.skipIf(skip)("schema constraints", () => {
         [spaceId, code, future],
       );
       await client.query(
-        "INSERT INTO revisions (space_id, handoff_code, revision, markdown, created_at, redaction_count) VALUES ($1, $2, 1, $3, $4, 0)",
+        "INSERT INTO revisions (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin) VALUES ($1, $2, 1, $3, $4, 0, 'mcp')",
         [spaceId, code, "hello", now],
       );
     });
@@ -80,7 +80,7 @@ describe.skipIf(skip)("schema constraints", () => {
     for (const badRevision of [0, 26]) {
       await expect(
         pool.query(
-          "INSERT INTO revisions (space_id, handoff_code, revision, markdown, created_at, redaction_count) VALUES ($1, $2, $3, $4, $5, 0)",
+          "INSERT INTO revisions (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin) VALUES ($1, $2, $3, $4, $5, 0, 'mcp')",
           [spaceId, code, badRevision, "x", now],
         ),
       ).rejects.toThrow();
@@ -100,7 +100,33 @@ describe.skipIf(skip)("schema constraints", () => {
 
     await expect(
       pool.query(
-        "INSERT INTO revisions (space_id, handoff_code, revision, markdown, created_at, redaction_count) VALUES ($1, $2, 1, $3, $4, -1)",
+        "INSERT INTO revisions (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin) VALUES ($1, $2, 1, $3, $4, -1, 'mcp')",
+        [spaceId, code, "x", now],
+      ),
+    ).rejects.toThrow();
+
+    await pool.query("DELETE FROM handoffs WHERE space_id = $1 AND code = $2", [spaceId, code]);
+  });
+
+  it("rejects a revision origin outside the allowed set", async () => {
+    const spaceId = randomBytes(32);
+    const code = "ORG001";
+
+    await pool.query(
+      "INSERT INTO handoffs (space_id, code, latest_revision, expires_at) VALUES ($1, $2, 1, $3)",
+      [spaceId, code, future],
+    );
+
+    await expect(
+      pool.query(
+        "INSERT INTO revisions (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin) VALUES ($1, $2, 1, $3, $4, 0, 'agent')",
+        [spaceId, code, "x", now],
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      pool.query(
+        "INSERT INTO revisions (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin) VALUES ($1, $2, 1, $3, $4, 0, NULL)",
         [spaceId, code, "x", now],
       ),
     ).rejects.toThrow();

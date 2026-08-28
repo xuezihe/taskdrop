@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 
 import { MAX_MARKDOWN_BYTES, MAX_REVISIONS_PER_HANDOFF } from "./handoff-limits.js";
+import { revisionOriginSchema } from "./revision-origin.js";
 
 const HANDOFF_CODE_INPUT = z
   .string()
@@ -21,6 +22,7 @@ const revisionSnapshotSchema = z.object({
   markdown: z.string(),
   contentSanitized: z.boolean(),
   redactionCount: z.number().int().nonnegative(),
+  origin: revisionOriginSchema,
   createdAt: z.string().datetime({ offset: false }),
   expiresAt: z.string().datetime({ offset: false }),
 });

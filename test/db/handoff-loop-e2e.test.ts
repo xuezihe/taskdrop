@@ -105,8 +105,8 @@ async function insertHandoffFixture(
     );
     await client.query(
       `INSERT INTO revisions
-         (space_id, handoff_code, revision, markdown, created_at, redaction_count)
-       VALUES ($1, $2, 1, $3, $4, 0)`,
+         (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin)
+       VALUES ($1, $2, 1, $3, $4, 0, 'mcp')`,
       [input.spaceId, input.code, input.markdown, createdAt],
     );
   });
@@ -228,6 +228,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         markdown: sanitizedMarkdown,
         contentSanitized: true,
         redactionCount: 2,
+        origin: "mcp",
         createdAt: expect.any(String),
         expiresAt: expect.any(String),
       });
@@ -276,6 +277,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         markdown: sanitizedAppendedMarkdown,
         contentSanitized: true,
         redactionCount: 2,
+        origin: "mcp",
         createdAt: expect.any(String),
         expiresAt: expect.any(String),
       });
@@ -306,6 +308,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         markdown: thirdRevisionMarkdown,
         contentSanitized: false,
         redactionCount: 0,
+        origin: "mcp",
         createdAt: expect.any(String),
         expiresAt: expect.any(String),
       });
@@ -456,6 +459,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         revision: 1,
         latestRevision: 1,
         markdown: exactLimitMarkdown,
+        origin: "mcp",
       });
 
       const persistedExactLimit = await pool.query<PersistedMarkdown>(
@@ -524,8 +528,8 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
       await pool.query(
         `WITH inserted AS (
            INSERT INTO revisions
-             (space_id, handoff_code, revision, markdown, created_at, redaction_count)
-           SELECT $1, $2, revision, '# Revision ' || revision, now(), 0
+             (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin)
+           SELECT $1, $2, revision, '# Revision ' || revision, now(), 0, 'mcp'
            FROM generate_series(2, 25) AS revision
            RETURNING revision
          )
@@ -643,6 +647,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
           revision: 1,
           latestRevision: 1,
           markdown: "# Canonical fixture",
+          origin: "mcp",
         });
       }
 
@@ -660,6 +665,7 @@ describe.skipIf(skip)("Production handoff-loop endpoint", () => {
         revision: 2,
         latestRevision: 2,
         markdown: "# Appended through L alias",
+        origin: "mcp",
       });
 
       await expectInvisible();

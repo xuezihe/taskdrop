@@ -8,6 +8,7 @@ import type {
 } from "./handoff-store.js";
 import { normalizeHandoffCode } from "./handoff-code.js";
 import { MAX_MARKDOWN_BYTES } from "./handoff-limits.js";
+import type { RevisionOrigin } from "./revision-origin.js";
 import { redactSpaceKeys } from "./redaction.js";
 
 export interface ContentTooLarge {
@@ -22,6 +23,7 @@ export interface HandoffApplication {
   createHandoff(input: {
     spaceId: Uint8Array;
     markdown: string;
+    origin: RevisionOrigin;
   }): Promise<CreateHandoffApplicationResult>;
   getHandoff(input: {
     spaceId: Uint8Array;
@@ -33,12 +35,13 @@ export interface HandoffApplication {
     code: string;
     baseRevision: number;
     markdown: string;
+    origin: RevisionOrigin;
   }): Promise<AppendRevisionApplicationResult>;
 }
 
 export function createHandoffApplication(store: HandoffStore): HandoffApplication {
   return {
-    async createHandoff({ spaceId, markdown }): Promise<CreateHandoffApplicationResult> {
+    async createHandoff({ spaceId, markdown, origin }): Promise<CreateHandoffApplicationResult> {
       const sizeError = rejectOversizedMarkdown(markdown);
       if (sizeError) return sizeError;
 
@@ -48,6 +51,7 @@ export function createHandoffApplication(store: HandoffStore): HandoffApplicatio
         spaceId,
         markdown: redaction.markdown,
         redactionCount: redaction.redactionCount,
+        origin,
       });
     },
     getHandoff: ({ spaceId, code, revision }) =>
@@ -61,6 +65,7 @@ export function createHandoffApplication(store: HandoffStore): HandoffApplicatio
       code,
       baseRevision,
       markdown,
+      origin,
     }): Promise<AppendRevisionApplicationResult> {
       const sizeError = rejectOversizedMarkdown(markdown);
       if (sizeError) return sizeError;
@@ -73,6 +78,7 @@ export function createHandoffApplication(store: HandoffStore): HandoffApplicatio
         baseRevision,
         markdown: redaction.markdown,
         redactionCount: redaction.redactionCount,
+        origin,
       });
     },
   };

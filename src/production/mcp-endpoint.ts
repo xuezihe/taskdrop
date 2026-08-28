@@ -60,6 +60,7 @@ function createRequestProtocolServer(context: McpRequestContext, application: Ha
       application.createHandoff({
         spaceId: authentication.spaceId,
         markdown,
+        origin: "mcp",
       }),
     getHandoff: ({ code, revision }) =>
       application.getHandoff({
@@ -73,6 +74,7 @@ function createRequestProtocolServer(context: McpRequestContext, application: Ha
         code,
         baseRevision,
         markdown,
+        origin: "mcp",
       }),
   };
   return createProtocolServer(handlers);

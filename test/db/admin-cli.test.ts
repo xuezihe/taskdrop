@@ -48,11 +48,11 @@ describe.skipIf(skip)("Admin CLI", () => {
       );
       await client.query(
         `INSERT INTO revisions
-           (space_id, handoff_code, revision, markdown, created_at, redaction_count)
-         VALUES ($1, 'LIVEA1', 1, $2, now() - interval '3 hours', 0),
-                ($1, 'LIVEA1', 2, $3, now() - interval '2 hours', 0),
-                ($1, 'LIVEB1', 1, $4, now() - interval '1 hour', 0),
-                ($1, 'DEAD01', 1, $5, now() - interval '4 hours', 1)`,
+           (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin)
+         VALUES ($1, 'LIVEA1', 1, $2, now() - interval '3 hours', 0, 'mcp'),
+                ($1, 'LIVEA1', 2, $3, now() - interval '2 hours', 0, 'mcp'),
+                ($1, 'LIVEB1', 1, $4, now() - interval '1 hour', 0, 'mcp'),
+                ($1, 'DEAD01', 1, $5, now() - interval '4 hours', 1, 'mcp')`,
         [spaceId, markdown.liveA1, markdown.liveA2, markdown.liveB1, markdown.expired],
       );
     });
@@ -132,8 +132,8 @@ describe.skipIf(skip)("Admin CLI", () => {
       );
       await client.query(
         `INSERT INTO revisions
-           (space_id, handoff_code, revision, markdown, created_at, redaction_count)
-         VALUES ($1, 'PATH20', 1, 'identity path secret', now(), 0)`,
+           (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin)
+         VALUES ($1, 'PATH20', 1, 'identity path secret', now(), 0, 'mcp')`,
         [spaceId],
       );
     });
@@ -263,8 +263,8 @@ describe.skipIf(skip)("Admin CLI", () => {
     );
     await pool.query(
       `INSERT INTO revisions
-         (space_id, handoff_code, revision, markdown, created_at, redaction_count)
-       SELECT $1, lpad(n::text, 6, '0'), 1, 'cleanup secret', now() - interval '2 hours', 0
+         (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin)
+       SELECT $1, lpad(n::text, 6, '0'), 1, 'cleanup secret', now() - interval '2 hours', 0, 'mcp'
        FROM generate_series(1, 101) AS fixture(n)`,
       [expiredSpaceId],
     );
@@ -276,8 +276,8 @@ describe.skipIf(skip)("Admin CLI", () => {
       );
       await client.query(
         `INSERT INTO revisions
-           (space_id, handoff_code, revision, markdown, created_at, redaction_count)
-         VALUES ($1, 'LIVE20', 1, 'live cleanup secret', now(), 0)`,
+           (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin)
+         VALUES ($1, 'LIVE20', 1, 'live cleanup secret', now(), 0, 'mcp')`,
         [liveSpaceId],
       );
     });
@@ -423,12 +423,12 @@ describe.skipIf(skip)("Admin CLI", () => {
       );
       await client.query(
         `INSERT INTO revisions
-           (space_id, handoff_code, revision, markdown, created_at, redaction_count)
-         VALUES ($1, 'LIVEA1', 1, $3, now() - interval '3 hours', 0),
-                ($1, 'LIVEA1', 2, $4, now() - interval '2 hours', 0),
-                ($1, 'LIVEB1', 1, $5, now() - interval '1 hour', 0),
-                ($1, 'DEAD01', 1, $6, now() - interval '4 hours', 1),
-                ($2, 'LIVEG1', 1, $7, now() - interval '30 minutes', 0)`,
+           (space_id, handoff_code, revision, markdown, created_at, redaction_count, origin)
+         VALUES ($1, 'LIVEA1', 1, $3, now() - interval '3 hours', 0, 'mcp'),
+                ($1, 'LIVEA1', 2, $4, now() - interval '2 hours', 0, 'mcp'),
+                ($1, 'LIVEB1', 1, $5, now() - interval '1 hour', 0, 'mcp'),
+                ($1, 'DEAD01', 1, $6, now() - interval '4 hours', 1, 'mcp'),
+                ($2, 'LIVEG1', 1, $7, now() - interval '30 minutes', 0, 'mcp')`,
         [
           spaceA,
           spaceB,

@@ -9,7 +9,7 @@
     "pnpm": ">=10.13 <11"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && cp -r src/production/migrations dist/production/migrations",
+    "build": "tsc -p tsconfig.build.json && rm -rf dist/production/migrations && cp -r src/production/migrations dist/production/migrations",
     "build:web": "vite build --config web/vite.config.ts",
     "dev:web": "vite --config web/vite.config.ts",
     "format": "prettier --write \"src/**/*.ts\" \"web/**/*.{ts,css,html}\" \"test/**/*.ts\" \"*.{json,ts,mjs}\"",
