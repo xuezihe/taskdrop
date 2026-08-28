@@ -15,8 +15,17 @@ export type McpCredentialRequest = {
   readonly headers: IncomingHttpHeaders;
 };
 
+export type BrowserCredentialRequest = {
+  readonly url?: string | undefined;
+  readonly headers: IncomingHttpHeaders;
+};
+
 export type McpCredentialOutcome =
   | { readonly kind: "not-mcp-path" }
+  | { readonly kind: "unauthenticated" }
+  | { readonly kind: "authenticated"; readonly authentication: AuthenticatedSpace };
+
+export type BrowserCredentialOutcome =
   | { readonly kind: "unauthenticated" }
   | { readonly kind: "authenticated"; readonly authentication: AuthenticatedSpace };
 
@@ -42,20 +51,44 @@ export async function authenticateMcpCredential(
     return { kind: "unauthenticated" };
   }
 
+  const authentication = await authenticateSpaceKey(
+    credential,
+    bearer && query ? "both" : bearer ? "bearer" : "query",
+  );
+  return authentication ? { kind: "authenticated", authentication } : { kind: "unauthenticated" };
+}
+
+export async function authenticateBrowserCredential(
+  request: BrowserCredentialRequest,
+): Promise<BrowserCredentialOutcome> {
+  const requestUrl = new URL(request.url ?? "/", "http://taskdrop.invalid");
+  if (
+    readQueryCredential(requestUrl) !== undefined ||
+    requestUrl.searchParams.has("localSpaceId")
+  ) {
+    return { kind: "unauthenticated" };
+  }
+
+  const bearer = readBearer(request.headers.authorization);
+  if (bearer === undefined || bearer === "malformed") {
+    return { kind: "unauthenticated" };
+  }
+
+  const authentication = await authenticateSpaceKey(bearer, "bearer");
+  return authentication ? { kind: "authenticated", authentication } : { kind: "unauthenticated" };
+}
+
+async function authenticateSpaceKey(
+  credential: string,
+  carrier: CredentialCarrier,
+): Promise<AuthenticatedSpace | null> {
   try {
     const keyBytes = parseSpaceKey(credential);
     const spaceId = await deriveSpaceId(keyBytes);
     const spaceFingerprint = await deriveSpaceFingerprint(spaceId);
-    return {
-      kind: "authenticated",
-      authentication: {
-        spaceId,
-        spaceFingerprint,
-        carrier: bearer && query ? "both" : bearer ? "bearer" : "query",
-      },
-    };
+    return { spaceId, spaceFingerprint, carrier };
   } catch {
-    return { kind: "unauthenticated" };
+    return null;
   }
 }
 

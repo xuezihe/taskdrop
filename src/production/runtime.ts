@@ -5,6 +5,7 @@ import { createPool } from "./db.js";
 import { startExpiredHandoffCleanup, type CleanupObservation } from "./expired-handoff-cleanup.js";
 import { createHandoffApplication } from "./handoff-application.js";
 import { createHandoffStore } from "./handoff-store.js";
+import { createBrowserApiHandler, isBrowserApiPath } from "./browser-api.js";
 import { createMcpEndpoint } from "./mcp-endpoint.js";
 import { createMcpHttpAuthenticationHandler } from "./mcp-http-auth.js";
 
@@ -25,6 +26,7 @@ export async function startProduction(config: ProductionConfig): Promise<Running
   const pool = createPool(config.databaseUrl);
   const store = createHandoffStore(pool, config.retentionWindowMs);
   const application = createHandoffApplication(store);
+  const browserApi = createBrowserApiHandler(application);
   const mcpEndpoint = createMcpEndpoint(application);
   const authenticateMcp = createMcpHttpAuthenticationHandler((authentication, request, response) =>
     mcpEndpoint.dispatch(authentication, request, response),
@@ -51,6 +53,10 @@ export async function startProduction(config: ProductionConfig): Promise<Running
 
   const server = http.createServer((req, res) => {
     if (req.url !== "/health" || req.method !== "GET") {
+      if (isBrowserApiPath(req.url)) {
+        void browserApi(req, res);
+        return;
+      }
       void authenticateMcp(req, res);
       return;
     }

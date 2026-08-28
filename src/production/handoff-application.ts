@@ -19,6 +19,7 @@ export interface ContentTooLarge {
 
 export type CreateHandoffApplicationResult = CreateHandoffStoreResult | ContentTooLarge;
 export type AppendRevisionApplicationResult = HandoffStoreResult | ContentTooLarge;
+export type GetHandoffApplicationResult = GetHandoffStoreResult;
 export type GetRevisionHistoryApplicationResult = GetRevisionHistoryStoreResult;
 
 export interface HandoffApplication {
@@ -31,7 +32,7 @@ export interface HandoffApplication {
     spaceId: Uint8Array;
     code: string;
     revision: number | "latest";
-  }): Promise<GetHandoffStoreResult>;
+  }): Promise<GetHandoffApplicationResult>;
   getRevisionHistory(input: {
     spaceId: Uint8Array;
     code: string;
