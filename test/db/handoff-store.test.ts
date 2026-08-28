@@ -236,6 +236,103 @@ describe.skipIf(skip)("HandoffStore revision loop", () => {
     expect(historical.origin).toBe("human");
   });
 
+  it("returns newest-first Revision history metadata without Markdown or retention refresh", async () => {
+    const spaceId = randomBytes(32);
+    const created = await store.createHandoff({
+      spaceId,
+      markdown: "# Created by human",
+      redactionCount: 0,
+      origin: "human",
+    });
+    assertSnapshot(created);
+
+    const firstAppend = await store.appendRevision({
+      spaceId,
+      code: created.code,
+      baseRevision: 1,
+      markdown: "# Updated by WebMCP",
+      redactionCount: 0,
+      origin: "webmcp",
+    });
+    assertSnapshot(firstAppend);
+    const secondAppend = await store.appendRevision({
+      spaceId,
+      code: created.code,
+      baseRevision: 2,
+      markdown: "# Updated by MCP",
+      redactionCount: 0,
+      origin: "mcp",
+    });
+    assertSnapshot(secondAppend);
+
+    const expiryBeforeResult = await pool.query<{ expires_at: Date }>(
+      "SELECT expires_at FROM handoffs WHERE space_id = $1 AND code = $2",
+      [spaceId, created.code],
+    );
+    const expiresAtBefore = expiryBeforeResult.rows[0]!.expires_at;
+
+    const history = await store.getRevisionHistory({
+      spaceId,
+      code: created.code,
+    });
+
+    expect(history).toEqual({
+      ok: true,
+      code: created.code,
+      latestRevision: 3,
+      expiresAt: expiresAtBefore.toISOString(),
+      revisions: [
+        { revision: 3, origin: "mcp", createdAt: secondAppend.createdAt },
+        { revision: 2, origin: "webmcp", createdAt: firstAppend.createdAt },
+        { revision: 1, origin: "human", createdAt: created.createdAt },
+      ],
+    });
+    if (!history.ok) throw new Error("Expected Revision history success");
+    for (const revision of history.revisions) {
+      expect(revision).not.toHaveProperty("markdown");
+    }
+
+    const expiryAfterResult = await pool.query<{ expires_at: Date }>(
+      "SELECT expires_at FROM handoffs WHERE space_id = $1 AND code = $2",
+      [spaceId, created.code],
+    );
+    expect(expiryAfterResult.rows[0]!.expires_at.getTime()).toBe(expiresAtBefore.getTime());
+  });
+
+  it("returns HANDOFF_NOT_FOUND for another Space and an expired Handoff", async () => {
+    const spaceId = randomBytes(32);
+    const otherSpaceId = randomBytes(32);
+    const created = await store.createHandoff({
+      spaceId,
+      markdown: "# Private history",
+      redactionCount: 0,
+      origin: "mcp",
+    });
+    assertSnapshot(created);
+
+    const otherSpace = await store.getRevisionHistory({
+      spaceId: otherSpaceId,
+      code: created.code,
+    });
+    expect(otherSpace).toEqual({
+      ok: false,
+      error: { code: "HANDOFF_NOT_FOUND", handoffCode: created.code },
+    });
+
+    await pool.query(
+      "UPDATE handoffs SET expires_at = now() - interval '1 second' WHERE space_id = $1 AND code = $2",
+      [spaceId, created.code],
+    );
+    const expired = await store.getRevisionHistory({
+      spaceId,
+      code: created.code,
+    });
+    expect(expired).toEqual({
+      ok: false,
+      error: { code: "HANDOFF_NOT_FOUND", handoffCode: created.code },
+    });
+  });
+
   it("stale append returns REVISION_CONFLICT with no mutation and no expiry refresh", async () => {
     const spaceId = randomBytes(32);
     const created = await store.createHandoff({

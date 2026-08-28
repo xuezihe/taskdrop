@@ -37,6 +37,20 @@ export interface RevisionSnapshot {
   expiresAt: string;
 }
 
+export interface RevisionHistoryItem {
+  revision: number;
+  origin: RevisionOrigin;
+  createdAt: string;
+}
+
+export interface RevisionHistorySnapshot {
+  ok: true;
+  code: string;
+  latestRevision: number;
+  expiresAt: string;
+  revisions: RevisionHistoryItem[];
+}
+
 export type HandoffStoreError =
   | { ok: false; error: { code: "HANDOFF_NOT_FOUND"; handoffCode: string } }
   | {
@@ -57,6 +71,7 @@ export type SpaceQuotaExceeded = Extract<
 export type HandoffNotFound = Extract<HandoffStoreError, { error: { code: "HANDOFF_NOT_FOUND" } }>;
 export type CreateHandoffStoreResult = RevisionSnapshot | SpaceQuotaExceeded;
 export type GetHandoffStoreResult = RevisionSnapshot | HandoffNotFound;
+export type GetRevisionHistoryStoreResult = RevisionHistorySnapshot | HandoffNotFound;
 
 export interface HandoffStore {
   cleanupExpiredHandoffs(): Promise<number>;
@@ -71,6 +86,10 @@ export interface HandoffStore {
     code: string;
     revision: number | "latest";
   }): Promise<GetHandoffStoreResult>;
+  getRevisionHistory(input: {
+    spaceId: Uint8Array;
+    code: string;
+  }): Promise<GetRevisionHistoryStoreResult>;
   appendRevision(input: {
     spaceId: Uint8Array;
     code: string;
@@ -96,6 +115,12 @@ interface HandoffRow {
 }
 
 type RevisionSnapshotRow = HandoffRow & RevisionRow;
+
+interface RevisionHistoryRow extends HandoffRow {
+  revision: number;
+  origin: RevisionOrigin;
+  created_at: Date;
+}
 
 function generateCode(): string {
   const bytes = randomBytes(CODE_LENGTH);
@@ -257,6 +282,38 @@ export function createHandoffStore(
         };
       }
       return toSnapshot(row, row);
+    },
+
+    async getRevisionHistory({ spaceId, code }): Promise<GetRevisionHistoryStoreResult> {
+      const result = await pool.query<RevisionHistoryRow>(
+        `SELECT h.code, h.latest_revision, h.expires_at,
+                r.revision, r.origin, r.created_at
+         FROM handoffs h
+         JOIN revisions r
+           ON r.space_id = h.space_id
+          AND r.handoff_code = h.code
+         WHERE h.space_id = $1 AND h.code = $2 AND h.expires_at > now()
+         ORDER BY r.revision DESC`,
+        [spaceId, code],
+      );
+      const firstRow = result.rows[0];
+      if (!firstRow) {
+        return {
+          ok: false,
+          error: { code: "HANDOFF_NOT_FOUND", handoffCode: code },
+        };
+      }
+      return {
+        ok: true,
+        code: firstRow.code,
+        latestRevision: firstRow.latest_revision,
+        expiresAt: firstRow.expires_at.toISOString(),
+        revisions: result.rows.map((row) => ({
+          revision: row.revision,
+          origin: row.origin,
+          createdAt: row.created_at.toISOString(),
+        })),
+      };
     },
 
     async appendRevision({

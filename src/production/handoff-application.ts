@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 
 import type {
   CreateHandoffStoreResult,
+  GetRevisionHistoryStoreResult,
   GetHandoffStoreResult,
   HandoffStore,
   HandoffStoreResult,
@@ -18,6 +19,7 @@ export interface ContentTooLarge {
 
 export type CreateHandoffApplicationResult = CreateHandoffStoreResult | ContentTooLarge;
 export type AppendRevisionApplicationResult = HandoffStoreResult | ContentTooLarge;
+export type GetRevisionHistoryApplicationResult = GetRevisionHistoryStoreResult;
 
 export interface HandoffApplication {
   createHandoff(input: {
@@ -30,6 +32,10 @@ export interface HandoffApplication {
     code: string;
     revision: number | "latest";
   }): Promise<GetHandoffStoreResult>;
+  getRevisionHistory(input: {
+    spaceId: Uint8Array;
+    code: string;
+  }): Promise<GetRevisionHistoryApplicationResult>;
   appendRevision(input: {
     spaceId: Uint8Array;
     code: string;
@@ -59,6 +65,11 @@ export function createHandoffApplication(store: HandoffStore): HandoffApplicatio
         spaceId,
         code: normalizeHandoffCode(code),
         revision,
+      }),
+    getRevisionHistory: ({ spaceId, code }) =>
+      store.getRevisionHistory({
+        spaceId,
+        code: normalizeHandoffCode(code),
       }),
     async appendRevision({
       spaceId,
