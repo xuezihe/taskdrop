@@ -1,5 +1,6 @@
 import { COPY, type Copy } from "./copy.js";
 import { createSpaceKey } from "./generate-space-key.js";
+import { parseHandoffPath } from "./handoff-route.js";
 import { LANGUAGE_STORAGE_KEY, type LandingLanguage, resolveLanguage } from "./language.js";
 import { bearerMcpFields, formatMcpSnippet, queryMcpFields } from "./mcp-config.js";
 import { resolveMcpOrigin } from "./mcp-origin.js";
@@ -296,5 +297,14 @@ function render(): void {
   });
 }
 
-window.addEventListener("beforeunload", onBeforeUnload);
-render();
+const handoffCode = parseHandoffPath(window.location.pathname);
+if (handoffCode) {
+  void import("./handoff-workspace.js")
+    .then(({ mountHandoffWorkspace }) => mountHandoffWorkspace(root, handoffCode))
+    .catch(() => {
+      root.textContent = "The Handoff Workspace could not be loaded.";
+    });
+} else {
+  window.addEventListener("beforeunload", onBeforeUnload);
+  render();
+}
