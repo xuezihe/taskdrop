@@ -1,0 +1,42 @@
+# TaskDrop same-origin deployment
+#
+# Caddy serves the Vite-built static Workspace and reverse proxies
+# same-origin /api/* and /mcp requests to the Node runtime.
+#
+# Copy this file to Caddyfile and adjust the domain and port:
+#
+#   cp Caddyfile.example Caddyfile
+#   caddy run
+#
+# Environment variables (or replace the placeholders inline):
+#
+#   TASKDROP_DOMAIN   Public HTTPS domain (default: localhost)
+#   TASKDROP_PORT     Node runtime port   (default: 3000)
+#
+# The Node runtime must be started separately:
+#
+#   PORT=3000 DATABASE_URL=postgres://... node dist/production/main.js
+
+{$TASKDROP_DOMAIN:localhost} {
+	# Browser API — same-origin fetch from the Workspace
+	handle /api/* {
+		reverse_proxy 127.0.0.1:{$TASKDROP_PORT:3000}
+	}
+
+	# Remote MCP — may also be exposed on a separate public origin
+	handle /mcp {
+		reverse_proxy 127.0.0.1:{$TASKDROP_PORT:3000}
+	}
+
+	# Health probe
+	handle /health {
+		reverse_proxy 127.0.0.1:{$TASKDROP_PORT:3000}
+	}
+
+	# Static Workspace and landing page (Vite build output)
+	handle {
+		root * {$TASKDROP_WEB_ROOT:dist/landing}
+		try_files {path} /index.html
+		file_server
+	}
+}

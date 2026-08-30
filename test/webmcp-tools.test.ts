@@ -272,6 +272,23 @@ describe("Handoff WebMCP tools", () => {
     });
   });
 
+  it("never exposes the Space Key in any tool execution output", async () => {
+    const controller = await readyController();
+    const tools = createHandoffWebMcpTools(controller);
+
+    const results: unknown[] = [];
+    results.push(await execute(tool(tools, "get_handoff_context"), {}));
+    results.push(await execute(tool(tools, "get_revision_history"), {}));
+    results.push(await execute(tool(tools, "read_revision"), { revision: 1 }));
+    results.push(await execute(tool(tools, "update_working_draft"), { markdown: "# Draft" }));
+    results.push(await execute(tool(tools, "commit_working_draft"), {}));
+
+    const serialized = JSON.stringify(results);
+    expect(serialized).not.toContain(SPACE_KEY);
+    expect(serialized).not.toMatch(/tdp_[A-Za-z0-9+/=]{20,}/);
+    expect(serialized).not.toContain("localSpaceId");
+  });
+
   it("rejects invalid direct execution inputs with a structured result", async () => {
     const tools = createHandoffWebMcpTools(await readyController());
 
