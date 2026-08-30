@@ -6,6 +6,7 @@ import {
   type WorkspaceState,
 } from "./handoff-workspace-controller.js";
 import { createSessionWorkingDraftStorage } from "./handoff-session-storage.js";
+import { renderMarkdownToHtml } from "./markdown-preview.js";
 import { bindHandoffWebMcpTools } from "./webmcp-registration.js";
 
 export async function mountHandoffWorkspace(root: HTMLElement, routeCode: string): Promise<void> {
@@ -85,10 +86,37 @@ function createView(
   editorTitle.textContent = "Markdown Workspace";
   const committedMeta = document.createElement("p");
   committedMeta.className = "workspace-meta";
+
+  const tabBar = document.createElement("div");
+  tabBar.className = "workspace-tabs";
+  tabBar.setAttribute("role", "tablist");
+  tabBar.setAttribute("aria-label", "Editor view");
+  const sourceTab = document.createElement("button");
+  sourceTab.type = "button";
+  sourceTab.setAttribute("role", "tab");
+  sourceTab.setAttribute("aria-selected", "true");
+  sourceTab.dataset.tab = "source";
+  sourceTab.textContent = "Source";
+  const previewTab = document.createElement("button");
+  previewTab.type = "button";
+  previewTab.setAttribute("role", "tab");
+  previewTab.setAttribute("aria-selected", "false");
+  previewTab.dataset.tab = "preview";
+  previewTab.textContent = "Preview";
+  tabBar.append(sourceTab, previewTab);
+
   const textarea = document.createElement("textarea");
   textarea.className = "workspace-textarea";
   textarea.setAttribute("aria-label", "Handoff Markdown");
   textarea.spellcheck = false;
+
+  const preview = document.createElement("div");
+  preview.className = "workspace-preview";
+  preview.setAttribute("aria-label", "Rendered Markdown preview");
+  preview.hidden = true;
+
+  let activeTab: "source" | "preview" = "source";
+
   const draftMeta = document.createElement("p");
   draftMeta.className = "workspace-draft-meta";
   const actions = document.createElement("div");
@@ -105,11 +133,32 @@ function createView(
   const actionMessage = document.createElement("p");
   actionMessage.className = "workspace-message";
   actionMessage.setAttribute("aria-live", "polite");
-  workspace.append(editorTitle, committedMeta, textarea, draftMeta, actions, actionMessage);
+  workspace.append(
+    editorTitle,
+    committedMeta,
+    tabBar,
+    textarea,
+    preview,
+    draftMeta,
+    actions,
+    actionMessage,
+  );
 
   const loadMessage = document.createElement("p");
   loadMessage.className = "workspace-load-message";
   loadMessage.setAttribute("aria-live", "polite");
+
+  function switchTab(tab: "source" | "preview"): void {
+    activeTab = tab;
+    sourceTab.setAttribute("aria-selected", String(tab === "source"));
+    previewTab.setAttribute("aria-selected", String(tab === "preview"));
+    textarea.hidden = tab !== "source";
+    preview.hidden = tab !== "preview";
+    if (tab === "preview") {
+      const markdown = textarea.value;
+      preview.innerHTML = renderMarkdownToHtml(markdown);
+    }
+  }
 
   keyForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -121,6 +170,8 @@ function createView(
     keyInput.focus();
   });
   textarea.addEventListener("input", () => controller.updateMarkdown(textarea.value));
+  sourceTab.addEventListener("click", () => switchTab("source"));
+  previewTab.addEventListener("click", () => switchTab("preview"));
   discard.addEventListener("click", () => controller.discard());
   commit.addEventListener("click", () => void controller.commit());
 
@@ -153,6 +204,9 @@ function createView(
 
       const markdown = state.workingDraft?.markdown ?? state.committed.markdown;
       if (textarea.value !== markdown) textarea.value = markdown;
+      if (activeTab === "preview") {
+        preview.innerHTML = renderMarkdownToHtml(markdown);
+      }
       textarea.disabled = state.commitPending;
       committedMeta.textContent = `Latest committed Revision: r${state.committed.revision} · Expires ${formatExpiry(state.committed.expiresAt)}`;
       draftMeta.textContent = state.workingDraft
