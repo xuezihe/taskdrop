@@ -55,9 +55,16 @@ export type WorkspaceHistoryResult =
 
 export type WorkspaceUpdateResult = { ok: true } | { ok: false; error: WorkspaceError };
 
+export type MarkdownChangeReason = "human-edit" | "webmcp-replace" | "workspace-reset" | null;
+
+export type WorkspaceListener = (
+  state: WorkspaceState,
+  markdownChange: MarkdownChangeReason,
+) => void;
+
 export interface HandoffWorkspaceController {
   getState(): WorkspaceState;
-  subscribe(listener: (state: WorkspaceState) => void): () => void;
+  subscribe(listener: WorkspaceListener): () => void;
   open(): Promise<void>;
   submitSpaceKey(spaceKey: string): Promise<void>;
   getRevisionHistory(signal?: AbortSignal): Promise<WorkspaceHistoryResult>;
@@ -78,7 +85,7 @@ export interface HandoffWorkspaceControllerOptions {
 export function createHandoffWorkspaceController(
   options: HandoffWorkspaceControllerOptions,
 ): HandoffWorkspaceController {
-  const listeners = new Set<(state: WorkspaceState) => void>();
+  const listeners = new Set<WorkspaceListener>();
   const now = options.now ?? (() => new Date().toISOString());
   let state: WorkspaceState = {
     kind: "needs-space-key",
@@ -88,19 +95,19 @@ export function createHandoffWorkspaceController(
   let activeSpace: { localSpaceId: string; client: BrowserApiClient } | null = null;
   let loadSequence = 0;
 
-  const notify = (): void => {
-    for (const listener of listeners) listener(state);
+  const notify = (reason: MarkdownChangeReason): void => {
+    for (const listener of listeners) listener(state, reason);
   };
 
-  const setState = (next: WorkspaceState): void => {
+  const setState = (next: WorkspaceState, reason: MarkdownChangeReason): void => {
     state = next;
-    notify();
+    notify(reason);
   };
 
   const loadWithSpaceKey = async (spaceKey: string): Promise<void> => {
     const sequence = ++loadSequence;
     activeSpace = null;
-    setState({ kind: "loading", code: options.code });
+    setState({ kind: "loading", code: options.code }, null);
 
     try {
       const localSpaceId = await deriveLocalSpaceId(spaceKey);
@@ -108,27 +115,33 @@ export function createHandoffWorkspaceController(
       const result = await client.getCurrent(options.code);
       if (sequence !== loadSequence) return;
       if (!result.ok) {
-        setState({ kind: "load-error", code: options.code, error: result.error });
+        setState({ kind: "load-error", code: options.code, error: result.error }, null);
         return;
       }
 
       const workingDraft = options.workingDraftStorage.load(localSpaceId, result.code);
       activeSpace = { localSpaceId, client };
-      setState({
-        kind: "ready",
-        code: result.code,
-        committed: result,
-        workingDraft,
-        commitPending: false,
-        actionError: null,
-      });
+      setState(
+        {
+          kind: "ready",
+          code: result.code,
+          committed: result,
+          workingDraft,
+          commitPending: false,
+          actionError: null,
+        },
+        "workspace-reset",
+      );
     } catch {
       if (sequence !== loadSequence) return;
-      setState({
-        kind: "load-error",
-        code: options.code,
-        error: { code: "NETWORK_ERROR" },
-      });
+      setState(
+        {
+          kind: "load-error",
+          code: options.code,
+          error: { code: "NETWORK_ERROR" },
+        },
+        null,
+      );
     }
   };
 
@@ -144,7 +157,7 @@ export function createHandoffWorkspaceController(
       const spaceKey = getStoredSpaceKey(options.sessionStorage);
       if (!spaceKey) {
         activeSpace = null;
-        setState({ kind: "needs-space-key", code: options.code, inputError: null });
+        setState({ kind: "needs-space-key", code: options.code, inputError: null }, null);
         return;
       }
       await loadWithSpaceKey(spaceKey);
@@ -152,21 +165,27 @@ export function createHandoffWorkspaceController(
 
     async submitSpaceKey(spaceKey: string): Promise<void> {
       if (!isCanonicalSpaceKey(spaceKey)) {
-        setState({
-          kind: "needs-space-key",
-          code: options.code,
-          inputError: { code: "INVALID_SPACE_KEY" },
-        });
+        setState(
+          {
+            kind: "needs-space-key",
+            code: options.code,
+            inputError: { code: "INVALID_SPACE_KEY" },
+          },
+          null,
+        );
         return;
       }
       try {
         setStoredSpaceKey(options.sessionStorage, spaceKey);
       } catch {
-        setState({
-          kind: "needs-space-key",
-          code: options.code,
-          inputError: { code: "SPACE_KEY_STORAGE_ERROR" },
-        });
+        setState(
+          {
+            kind: "needs-space-key",
+            code: options.code,
+            inputError: { code: "SPACE_KEY_STORAGE_ERROR" },
+          },
+          null,
+        );
         return;
       }
       await loadWithSpaceKey(spaceKey);
@@ -239,7 +258,15 @@ export function createHandoffWorkspaceController(
       } catch {
         actionError = { code: "DRAFT_STORAGE_ERROR" };
       }
-      setState({ ...state, workingDraft: draft, actionError });
+      const previousMarkdown = state.workingDraft?.markdown ?? state.committed.markdown;
+      const markdownChanged = previousMarkdown !== draft.markdown;
+      const reason: MarkdownChangeReason =
+        markdownChanged && !actionError
+          ? surface === "human"
+            ? "human-edit"
+            : "webmcp-replace"
+          : null;
+      setState({ ...state, workingDraft: draft, actionError }, reason);
       return actionError ? { ok: false, error: actionError } : { ok: true };
     },
 
@@ -247,9 +274,9 @@ export function createHandoffWorkspaceController(
       if (state.kind !== "ready" || !state.workingDraft || !activeSpace) return;
       try {
         options.workingDraftStorage.remove(activeSpace.localSpaceId, state.committed.code);
-        setState({ ...state, workingDraft: null, actionError: null });
+        setState({ ...state, workingDraft: null, actionError: null }, "workspace-reset");
       } catch {
-        setState({ ...state, actionError: { code: "DRAFT_STORAGE_ERROR" } });
+        setState({ ...state, actionError: { code: "DRAFT_STORAGE_ERROR" } }, null);
       }
     },
 
@@ -270,7 +297,7 @@ export function createHandoffWorkspaceController(
       const draft = state.workingDraft;
       const committed = state.committed;
       const space = activeSpace;
-      setState({ ...state, commitPending: true, actionError: null });
+      setState({ ...state, commitPending: true, actionError: null }, null);
 
       let result: BrowserClientResult;
       try {
@@ -291,30 +318,36 @@ export function createHandoffWorkspaceController(
         return result.ok ? { ok: true, value: result } : result;
       }
       if (!result.ok) {
-        setState({ ...state, commitPending: false, actionError: result.error });
+        setState({ ...state, commitPending: false, actionError: result.error }, null);
         return result;
       }
 
       try {
         options.workingDraftStorage.remove(space.localSpaceId, committed.code);
       } catch {
-        setState({
-          ...state,
-          committed: result,
-          commitPending: false,
-          actionError: { code: "DRAFT_STORAGE_ERROR" },
-        });
+        setState(
+          {
+            ...state,
+            committed: result,
+            commitPending: false,
+            actionError: { code: "DRAFT_STORAGE_ERROR" },
+          },
+          "workspace-reset",
+        );
         return { ok: true, value: result };
       }
 
-      setState({
-        kind: "ready",
-        code: result.code,
-        committed: result,
-        workingDraft: null,
-        commitPending: false,
-        actionError: null,
-      });
+      setState(
+        {
+          kind: "ready",
+          code: result.code,
+          committed: result,
+          workingDraft: null,
+          commitPending: false,
+          actionError: null,
+        },
+        "workspace-reset",
+      );
       return { ok: true, value: result };
     },
   };

@@ -14,7 +14,7 @@
     "dev:web": "vite --config web/vite.config.ts",
     "format": "prettier --write \"src/**/*.ts\" \"web/**/*.{ts,css,html}\" \"test/**/*.ts\" \"*.{json,ts,mjs}\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"web/**/*.{ts,css,html}\" \"test/**/*.ts\" \"*.{json,ts,mjs}\"",
-    "check": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit && tsc -p tsconfig.web-test.json --noEmit",
     "test": "vitest run",
     "test:db": "vitest run --config vitest.db.config.ts",
     "test:watch": "vitest",
@@ -30,6 +30,8 @@
     "verify": "pnpm format:check && pnpm check && pnpm build && pnpm build:web && pnpm test"
   },
   "dependencies": {
+    "@milkdown/crepe": "7.22.1",
+    "@milkdown/kit": "7.22.1",
     "@modelcontextprotocol/node": "2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
     "dompurify": "^3.4.14",

@@ -4,6 +4,7 @@ import { formatSpaceKey } from "../src/production/space-identity.js";
 import {
   createHandoffWorkspaceController,
   type HandoffWorkspaceController,
+  type MarkdownChangeReason,
   type WorkspaceState,
 } from "../web/handoff-workspace-controller.js";
 import type {
@@ -363,6 +364,115 @@ describe("Handoff Workspace controller", () => {
       markdown: "# Human follow-up",
       lastModifiedVia: "human",
       contributors: ["webmcp", "human"],
+    });
+  });
+
+  describe("markdown change reasons", () => {
+    it("emits workspace-reset when the Handoff loads", async () => {
+      const storage = new MemoryStorage();
+      const controller = createController(
+        storage,
+        new Map([[SPACE_KEY, fakeClient(success(revision()))]]),
+      );
+      const reasons: MarkdownChangeReason[] = [];
+      controller.subscribe((state, reason) => {
+        if (state.kind === "ready") reasons.push(reason);
+      });
+
+      await controller.submitSpaceKey(SPACE_KEY);
+      expect(reasons).toEqual(["workspace-reset"]);
+    });
+
+    it("emits human-edit for a Human surface change", async () => {
+      const storage = new MemoryStorage();
+      const controller = createController(
+        storage,
+        new Map([[SPACE_KEY, fakeClient(success(revision()))]]),
+      );
+      const reasons: MarkdownChangeReason[] = [];
+      controller.subscribe((_, reason) => reasons.push(reason));
+
+      await controller.submitSpaceKey(SPACE_KEY);
+      controller.updateMarkdown("# Human update");
+      expect(reasons.at(-1)).toBe("human-edit");
+    });
+
+    it("emits webmcp-replace for a WebMCP surface change", async () => {
+      const storage = new MemoryStorage();
+      const controller = createController(
+        storage,
+        new Map([[SPACE_KEY, fakeClient(success(revision()))]]),
+      );
+      const reasons: MarkdownChangeReason[] = [];
+      controller.subscribe((_, reason) => reasons.push(reason));
+
+      await controller.submitSpaceKey(SPACE_KEY);
+      controller.updateMarkdown("# Agent update", "webmcp");
+      expect(reasons.at(-1)).toBe("webmcp-replace");
+    });
+
+    it("emits null when the Markdown is unchanged", async () => {
+      const storage = new MemoryStorage();
+      const controller = createController(
+        storage,
+        new Map([[SPACE_KEY, fakeClient(success(revision()))]]),
+      );
+      const reasons: MarkdownChangeReason[] = [];
+      controller.subscribe((_, reason) => reasons.push(reason));
+
+      await controller.submitSpaceKey(SPACE_KEY);
+      controller.updateMarkdown("# Initial");
+      expect(reasons.at(-1)).toBeNull();
+    });
+
+    it("emits workspace-reset on discard", async () => {
+      const storage = new MemoryStorage();
+      const controller = createController(
+        storage,
+        new Map([[SPACE_KEY, fakeClient(success(revision()))]]),
+      );
+      const reasons: MarkdownChangeReason[] = [];
+      controller.subscribe((_, reason) => reasons.push(reason));
+
+      await controller.submitSpaceKey(SPACE_KEY);
+      controller.updateMarkdown("# Draft");
+      controller.discard();
+      expect(reasons.at(-1)).toBe("workspace-reset");
+    });
+
+    it("emits workspace-reset on successful commit", async () => {
+      const storage = new MemoryStorage();
+      const controller = createController(
+        storage,
+        new Map([[SPACE_KEY, fakeClient(success(revision({ revision: 2, latestRevision: 2 })))]]),
+      );
+      const reasons: MarkdownChangeReason[] = [];
+      controller.subscribe((_, reason) => reasons.push(reason));
+
+      await controller.submitSpaceKey(SPACE_KEY);
+      controller.updateMarkdown("# Draft");
+      await controller.commit();
+      expect(reasons.at(-1)).toBe("workspace-reset");
+    });
+
+    it("emits null for status-only updates", async () => {
+      const storage = new MemoryStorage();
+      const failed = {
+        ok: false as const,
+        error: { code: "NETWORK_ERROR" as const },
+      };
+      const controller = createController(
+        storage,
+        new Map([[SPACE_KEY, fakeClient(success(revision()), failed)]]),
+      );
+      const reasons: MarkdownChangeReason[] = [];
+      controller.subscribe((_, reason) => reasons.push(reason));
+
+      await controller.submitSpaceKey(SPACE_KEY);
+      controller.updateMarkdown("# Draft");
+      const beforeCommit = reasons.length;
+      await controller.commit();
+      expect(reasons.slice(beforeCommit)).toEqual([null, null]);
     });
   });
 });

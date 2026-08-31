@@ -13,5 +13,13 @@
     "types": ["node"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "web/**/*.ts", "vitest.config.ts"],
-  "exclude": ["web/main.ts", "web/vite.config.ts", "web/vite-env.d.ts"]
+  "exclude": [
+    "web/main.ts",
+    "web/vite.config.ts",
+    "web/vite-env.d.ts",
+    "web/css.d.ts",
+    "web/working-draft-editor.ts",
+    "web/handoff-workspace.ts",
+    "test/web/**/*.ts"
+  ]
 }

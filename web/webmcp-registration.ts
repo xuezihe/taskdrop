@@ -59,7 +59,7 @@ export function bindHandoffWebMcpTools(
     });
   };
 
-  const unsubscribe = controller.subscribe(synchronize);
+  const unsubscribe = controller.subscribe((state) => synchronize(state));
   synchronize(controller.getState());
 
   return {

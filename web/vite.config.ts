@@ -21,5 +21,15 @@ export default defineConfig({
     outDir: fileURLToPath(new URL("../dist/landing", import.meta.url)),
     emptyOutDir: true,
     assetsDir: "assets",
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("@milkdown/crepe")) return "milkdown-crepe";
+          if (id.includes("@milkdown/kit")) return "milkdown-kit";
+          if (id.includes("prosemirror")) return "prosemirror";
+        },
+      },
+    },
   },
 });
