@@ -1,3 +1,13 @@
+import "@milkdown/crepe/theme/common/prosemirror.css";
+import "@milkdown/crepe/theme/common/reset.css";
+import "@milkdown/crepe/theme/common/block-edit.css";
+import "@milkdown/crepe/theme/common/code-mirror.css";
+import "@milkdown/crepe/theme/common/cursor.css";
+import "@milkdown/crepe/theme/common/link-tooltip.css";
+import "@milkdown/crepe/theme/common/list-item.css";
+import "@milkdown/crepe/theme/common/placeholder.css";
+import "@milkdown/crepe/theme/common/toolbar.css";
+import "@milkdown/crepe/theme/common/top-bar.css";
 import "@milkdown/crepe/theme/classic.css";
 
 export type WorkingDraftEditorReplacement = {
@@ -31,7 +41,7 @@ export async function mountWorkingDraftEditor(input: {
       [Crepe.Feature.ImageBlock]: false,
       [Crepe.Feature.Latex]: false,
       [Crepe.Feature.Table]: false,
-      [Crepe.Feature.TopBar]: false,
+      [Crepe.Feature.TopBar]: true,
       [Crepe.Feature.AI]: false,
     },
   });

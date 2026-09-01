@@ -102,10 +102,70 @@ describe("Handoff Workspace UI", () => {
     await mountHandoffWorkspace(root, "ABC001");
 
     const keyForm = root.querySelector(".workspace-key-form");
+    const keyGate = root.querySelector<HTMLElement>(".workspace-key-gate");
     const layout = root.querySelector(".workspace-layout");
     expect(keyForm).toBeTruthy();
+    expect(keyGate?.hidden).toBe(true);
     expect(layout).toBeTruthy();
     expect(layout?.hasAttribute("hidden")).toBe(false);
+    expect(root.querySelector(".workspace-context-title")?.textContent).toBe("TaskDrop Handoff");
+    expect(root.querySelector(".workspace-context-meta")?.textContent).toContain("Revision 1");
+
+    root.remove();
+  });
+
+  it("keeps the loaded Workspace visible and surfaces a retry when the editor fails", async () => {
+    const { createHandoffWorkspaceController } =
+      await import("../../web/handoff-workspace-controller.js");
+    const { mountWorkingDraftEditor } = await import("../../web/working-draft-editor.js");
+    const { mountHandoffWorkspace } = await import("../../web/handoff-workspace.js");
+
+    const ready: Extract<WorkspaceState, { kind: "ready" }> = {
+      kind: "ready",
+      code: "ABC001",
+      committed: {
+        ok: true,
+        code: "ABC001",
+        revision: 3,
+        latestRevision: 3,
+        isLatest: true,
+        markdown: "# Loaded despite editor failure",
+        contentSanitized: false,
+        redactionCount: 0,
+        origin: "mcp",
+        createdAt: "2026-08-28T08:00:00.000Z",
+        expiresAt: "2026-08-29T08:00:00.000Z",
+      },
+      workingDraft: null,
+      commitPending: false,
+      actionError: null,
+    };
+    const controller: HandoffWorkspaceController = {
+      getState: () => ready,
+      subscribe: () => () => {},
+      open: async () => {},
+      submitSpaceKey: async () => {},
+      getRevisionHistory: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
+      readRevision: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
+      updateMarkdown: () => ({ ok: true }),
+      discard: () => {},
+      commit: async () => ({ ok: false, error: { code: "NO_WORKING_DRAFT" } }),
+    };
+
+    vi.mocked(createHandoffWorkspaceController).mockReturnValue(controller);
+    vi.mocked(mountWorkingDraftEditor).mockRejectedValueOnce(new Error("Crepe failed to mount"));
+
+    const root = document.createElement("div");
+    document.body.append(root);
+    await mountHandoffWorkspace(root, "ABC001");
+    await wait(0);
+
+    expect(root.querySelector<HTMLElement>(".workspace-layout")?.hidden).toBe(false);
+    expect(root.querySelector(".workspace-context-meta")?.textContent).toContain("Revision 3");
+    expect(root.querySelector(".workspace-editor-state")?.textContent).toContain(
+      "The document editor could not be loaded.",
+    );
+    expect(root.querySelector<HTMLElement>(".workspace-editor-retry")?.hidden).toBe(false);
 
     root.remove();
   });

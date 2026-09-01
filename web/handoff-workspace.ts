@@ -1,3 +1,5 @@
+import "./workspace.css";
+
 import { createBrowserApiClient } from "./browser-api-client.js";
 import {
   createHandoffWorkspaceController,
@@ -9,6 +11,13 @@ import {
 import { createSessionWorkingDraftStorage } from "./handoff-session-storage.js";
 import type { WorkingDraftEditor } from "./working-draft-editor.js";
 import { bindHandoffWebMcpTools } from "./webmcp-registration.js";
+
+type ReadyWorkspaceState = Extract<WorkspaceState, { kind: "ready" }>;
+
+type WorkspaceView = {
+  render(state: WorkspaceState, reason: MarkdownChangeReason): void;
+  destroy(): void;
+};
 
 export async function mountHandoffWorkspace(root: HTMLElement, routeCode: string): Promise<void> {
   let sessionStorage: Storage;
@@ -26,9 +35,15 @@ export async function mountHandoffWorkspace(root: HTMLElement, routeCode: string
     createClient: (spaceKey) => createBrowserApiClient(spaceKey),
   });
   const view = createView(root, controller, routeCode);
-  controller.subscribe(view.render);
+  const unsubscribe = controller.subscribe(view.render);
   const webMcpBinding = bindHandoffWebMcpTools(controller);
-  window.addEventListener("pagehide", () => webMcpBinding.dispose(), { once: true });
+  const dispose = (): void => {
+    unsubscribe();
+    webMcpBinding.dispose();
+    view.destroy();
+  };
+  window.addEventListener("pagehide", dispose, { once: true });
+
   view.render(controller.getState(), null);
   await controller.open();
 }
@@ -37,12 +52,20 @@ function createView(
   root: HTMLElement,
   controller: HandoffWorkspaceController,
   routeCode: string,
-): { render(state: WorkspaceState, reason: MarkdownChangeReason): void } {
+): WorkspaceView {
   const shell = document.createElement("main");
   shell.className = "workspace-shell";
+  shell.setAttribute("aria-label", "Handoff Workspace");
+
+  const keyGate = document.createElement("section");
+  keyGate.className = "workspace-key-gate";
+  keyGate.setAttribute("aria-labelledby", "workspace-key-title");
 
   const keyForm = document.createElement("form");
   keyForm.className = "workspace-key-form";
+  const keyTitle = document.createElement("h1");
+  keyTitle.id = "workspace-key-title";
+  keyTitle.textContent = "Open Handoff";
   const keyLabel = document.createElement("label");
   keyLabel.htmlFor = "workspace-space-key";
   keyLabel.textContent = "Space Key";
@@ -55,16 +78,18 @@ function createView(
   keyInput.placeholder = "tdp_...";
   const keySubmit = document.createElement("button");
   keySubmit.type = "submit";
-  keySubmit.className = "workspace-primary";
+  keySubmit.className = "workspace-key-submit";
   keySubmit.textContent = "Open Handoff";
   const keyMessage = document.createElement("p");
   keyMessage.className = "workspace-message";
   keyMessage.setAttribute("aria-live", "polite");
-  keyForm.append(keyLabel, keyInput, keySubmit, keyMessage);
+  keyForm.append(keyTitle, keyLabel, keyInput, keySubmit, keyMessage);
+  keyGate.append(keyForm);
 
   const loadMessage = document.createElement("p");
   loadMessage.className = "workspace-load-message";
   loadMessage.setAttribute("aria-live", "polite");
+  loadMessage.hidden = true;
 
   const layout = document.createElement("div");
   layout.className = "workspace-layout";
@@ -72,13 +97,16 @@ function createView(
 
   const sidebar = document.createElement("aside");
   sidebar.className = "workspace-sidebar";
+  sidebar.setAttribute("aria-label", "Workspace navigation");
 
   const historySection = document.createElement("section");
-  historySection.className = "workspace-sidebar-section";
+  historySection.className =
+    "workspace-sidebar-section workspace-history-section workspace-sidebar-section-grow";
   const historyTitle = document.createElement("h2");
   historyTitle.textContent = "History";
   const historyList = document.createElement("ul");
   historyList.className = "workspace-history-list";
+  historyList.setAttribute("aria-label", "Handoff history");
   const workingDraftRow = document.createElement("li");
   workingDraftRow.className = "workspace-history-row workspace-history-row-active";
   const workingDraftMarker = document.createElement("span");
@@ -112,7 +140,7 @@ function createView(
   spaceSection.append(spaceTitle, spaceValue, changeKey);
 
   const handoffSection = document.createElement("section");
-  handoffSection.className = "workspace-sidebar-section";
+  handoffSection.className = "workspace-sidebar-section workspace-handoff-section";
   const handoffTitle = document.createElement("h2");
   handoffTitle.textContent = "Handoff";
   const handoffValue = document.createElement("div");
@@ -121,31 +149,43 @@ function createView(
   handoffCode.textContent = routeCode;
   const copyCode = document.createElement("button");
   copyCode.type = "button";
-  copyCode.className = "workspace-icon-button";
+  copyCode.className = "workspace-icon-button workspace-copy-button";
   copyCode.setAttribute("aria-label", "Copy Handoff code");
   copyCode.title = "Copy Handoff code";
-  copyCode.textContent = "\u2398";
+  copyCode.textContent = "⧉";
   handoffValue.append(handoffCode, copyCode);
   handoffSection.append(handoffTitle, handoffValue);
 
   sidebar.append(historySection, spaceSection, handoffSection);
 
-  const main = document.createElement("div");
-  main.className = "workspace-main";
+  const documentPanel = document.createElement("section");
+  documentPanel.className = "workspace-document";
+  documentPanel.setAttribute("aria-label", "Working Draft document");
 
-  const topbar = document.createElement("div");
-  topbar.className = "workspace-topbar";
-  const topbarTitle = document.createElement("h1");
-  topbarTitle.className = "workspace-topbar-title";
-  topbarTitle.textContent = "TaskDrop Handoff";
+  const contextBar = document.createElement("header");
+  contextBar.className = "workspace-context-bar";
+  const documentContext = document.createElement("div");
+  documentContext.className = "workspace-document-context";
+  const contextTitle = document.createElement("h1");
+  contextTitle.className = "workspace-context-title";
+  contextTitle.textContent = "TaskDrop Handoff";
+  const contextMeta = document.createElement("div");
+  contextMeta.className = "workspace-context-meta";
+  const contextCode = document.createElement("span");
+  const contextRevision = document.createElement("span");
+  contextMeta.append(contextCode, contextRevision);
+  documentContext.append(contextTitle, contextMeta);
+
   const statusPill = document.createElement("span");
   statusPill.className = "workspace-status-pill";
-  statusPill.textContent = "No local draft";
+  statusPill.setAttribute("role", "status");
+  statusPill.textContent = "No local Working Draft";
+
   const topbarActions = document.createElement("div");
-  topbarActions.className = "workspace-topbar-actions";
+  topbarActions.className = "workspace-context-actions";
   const commit = document.createElement("button");
   commit.type = "button";
-  commit.className = "workspace-primary";
+  commit.className = "workspace-commit-button";
   commit.textContent = "Commit Revision";
   const overflow = document.createElement("button");
   overflow.type = "button";
@@ -153,7 +193,8 @@ function createView(
   overflow.setAttribute("aria-label", "More actions");
   overflow.setAttribute("aria-haspopup", "true");
   overflow.setAttribute("aria-expanded", "false");
-  overflow.textContent = "\u22ee";
+  overflow.title = "More actions";
+  overflow.textContent = "⋯";
   const overflowMenu = document.createElement("div");
   overflowMenu.className = "workspace-overflow-menu";
   overflowMenu.hidden = true;
@@ -167,6 +208,7 @@ function createView(
   discardConfirm.hidden = true;
   const discardConfirmText = document.createElement("p");
   discardConfirmText.textContent = "Discard the current Working Draft? This cannot be undone.";
+  const discardConfirmActions = document.createElement("div");
   const discardConfirmCancel = document.createElement("button");
   discardConfirmCancel.type = "button";
   discardConfirmCancel.className = "workspace-secondary";
@@ -175,28 +217,133 @@ function createView(
   discardConfirmAction.type = "button";
   discardConfirmAction.className = "workspace-danger";
   discardConfirmAction.textContent = "Discard";
-  discardConfirm.append(discardConfirmText, discardConfirmCancel, discardConfirmAction);
+  discardConfirmActions.append(discardConfirmCancel, discardConfirmAction);
+  discardConfirm.append(discardConfirmText, discardConfirmActions);
   overflowMenu.append(discardConfirm);
   topbarActions.append(commit, overflow, overflowMenu);
-  topbar.append(topbarTitle, statusPill, topbarActions);
+  contextBar.append(documentContext, statusPill, topbarActions);
 
   const actionMessage = document.createElement("p");
-  actionMessage.className = "workspace-message workspace-topbar-message";
+  actionMessage.className = "workspace-message workspace-action-message";
   actionMessage.setAttribute("aria-live", "polite");
+  actionMessage.hidden = true;
 
-  const editorCanvas = document.createElement("div");
-  editorCanvas.className = "workspace-editor-canvas";
+  const editorViewport = document.createElement("div");
+  editorViewport.className = "workspace-editor-viewport";
+  const editorRoot = document.createElement("div");
+  editorRoot.className = "workspace-editor-root";
+  editorRoot.hidden = true;
+  const editorState = document.createElement("div");
+  editorState.className = "workspace-editor-state";
+  editorState.setAttribute("role", "status");
+  editorState.setAttribute("aria-live", "polite");
+  const editorStateText = document.createElement("p");
+  const editorRetry = document.createElement("button");
+  editorRetry.type = "button";
+  editorRetry.className = "workspace-secondary workspace-editor-retry";
+  editorRetry.textContent = "Retry";
+  editorRetry.hidden = true;
+  editorState.append(editorStateText, editorRetry);
+  editorViewport.append(editorState, editorRoot);
 
-  main.append(topbar, actionMessage, editorCanvas);
-  layout.append(sidebar, main);
-  shell.append(keyForm, loadMessage, layout);
+  documentPanel.append(contextBar, actionMessage, editorViewport);
+  layout.append(sidebar, documentPanel);
+  shell.append(keyGate, loadMessage, layout);
   root.replaceChildren(shell);
   document.title = `TaskDrop — Handoff ${routeCode}`;
 
   let editor: WorkingDraftEditor | null = null;
   let editorMounting = false;
+  let editorError = false;
+  let editorDestroying: Promise<void> | null = null;
+  let mountSequence = 0;
   let overflowOpen = false;
-  let confirmingDiscard = false;
+  let destroyed = false;
+
+  const effectiveMarkdown = (state: ReadyWorkspaceState): string =>
+    state.workingDraft?.markdown ?? state.committed.markdown;
+
+  const renderEditorState = (): void => {
+    if (editor) {
+      editorRoot.hidden = false;
+      editorState.hidden = true;
+      return;
+    }
+
+    editorRoot.hidden = true;
+    if (editorMounting) {
+      editorState.hidden = false;
+      editorStateText.textContent = "Loading document editor…";
+      editorRetry.hidden = true;
+    } else if (editorError) {
+      editorState.hidden = false;
+      editorStateText.textContent = "The document editor could not be loaded.";
+      editorRetry.hidden = false;
+    } else {
+      editorState.hidden = true;
+      editorStateText.textContent = "";
+      editorRetry.hidden = true;
+    }
+  };
+
+  const destroyEditor = (): void => {
+    mountSequence += 1;
+    editorMounting = false;
+    editorError = false;
+    const activeEditor = editor;
+    editor = null;
+    editorRoot.replaceChildren();
+    if (activeEditor) {
+      editorDestroying = activeEditor.destroy().catch(() => undefined);
+    }
+    renderEditorState();
+  };
+
+  const mountEditor = async (): Promise<void> => {
+    if (destroyed || editor || editorMounting || editorError) return;
+    const state = controller.getState();
+    if (state.kind !== "ready") return;
+
+    const sequence = ++mountSequence;
+    editorMounting = true;
+    editorError = false;
+    renderEditorState();
+
+    const previousDestroy = editorDestroying;
+    if (previousDestroy) await previousDestroy;
+    if (destroyed || sequence !== mountSequence) return;
+
+    try {
+      const { mountWorkingDraftEditor } = await import("./working-draft-editor.js");
+      const current = controller.getState();
+      if (current.kind !== "ready") return;
+      const mountedEditor = await mountWorkingDraftEditor({
+        root: editorRoot,
+        markdown: effectiveMarkdown(current),
+        onHumanMarkdown: (value) => {
+          const latest = controller.getState();
+          if (latest.kind !== "ready" || latest.commitPending) return;
+          controller.updateMarkdown(value, "human");
+        },
+      });
+
+      if (destroyed || sequence !== mountSequence || controller.getState().kind !== "ready") {
+        await mountedEditor.destroy();
+        return;
+      }
+
+      editor = mountedEditor;
+      editorMounting = false;
+      editorDestroying = null;
+      render(controller.getState(), "workspace-reset");
+    } catch {
+      if (destroyed || sequence !== mountSequence) return;
+      editorMounting = false;
+      editorError = true;
+      editorRoot.replaceChildren();
+      renderEditorState();
+    }
+  };
 
   const showOverflow = (show: boolean): void => {
     overflowOpen = show;
@@ -205,50 +352,85 @@ function createView(
   };
 
   const showDiscardConfirm = (show: boolean): void => {
-    confirmingDiscard = show;
     discardMenuItem.hidden = show;
     discardConfirm.hidden = !show;
   };
 
-  const destroyEditor = (): void => {
-    if (editorMounting) editorMounting = false;
-    if (editor) {
-      const ed = editor;
-      editor = null;
-      void ed.destroy();
+  const renderState = (state: WorkspaceState): void => {
+    const isReady = state.kind === "ready";
+    const isLoading = state.kind === "loading";
+    const isNeedsKey = state.kind === "needs-space-key";
+    const isLoadError = state.kind === "load-error";
+
+    keyGate.hidden = !isNeedsKey && !isLoadError;
+    layout.hidden = !isReady;
+    loadMessage.hidden = !isLoading;
+    loadMessage.textContent = isLoading ? "Loading Handoff…" : "";
+    keyMessage.textContent = isNeedsKey
+      ? state.inputError
+        ? describeError(state.inputError)
+        : ""
+      : isLoadError
+        ? describeError(state.error)
+        : "";
+
+    if (!isReady) {
+      contextCode.textContent = "";
+      contextRevision.textContent = "";
+      statusPill.textContent = isLoading ? "Loading" : "Open a Handoff";
+      statusPill.className = "workspace-status-pill";
+      commit.disabled = true;
+      discardMenuItem.disabled = true;
+      discardConfirmAction.disabled = true;
+      actionMessage.hidden = true;
+      renderEditorState();
+      return;
     }
+
+    contextCode.textContent = state.code;
+    contextRevision.textContent = `Revision ${state.committed.revision}`;
+    statusPill.textContent = topbarStatusText(state);
+    statusPill.className = `workspace-status-pill ${
+      state.workingDraft ? "workspace-status-pill-active" : ""
+    }`;
+    workingDraftMeta.textContent = draftStatusText(state);
+    handoffCode.textContent = state.code;
+    commit.disabled = state.workingDraft === null || state.commitPending;
+    discardMenuItem.disabled = state.workingDraft === null || state.commitPending;
+    discardConfirmAction.disabled = state.workingDraft === null || state.commitPending;
+    const message = state.commitPending
+      ? "Committing Revision…"
+      : state.actionError
+        ? describeError(state.actionError)
+        : "";
+    actionMessage.hidden = message.length === 0;
+    actionMessage.textContent = message;
   };
 
-  const effectiveMarkdown = (state: Extract<WorkspaceState, { kind: "ready" }>): string =>
-    state.workingDraft?.markdown ?? state.committed.markdown;
+  const render = (state: WorkspaceState, reason: MarkdownChangeReason): void => {
+    renderState(state);
 
-  const mountEditor = async (): Promise<void> => {
-    if (editor || editorMounting) return;
-    const state = controller.getState();
-    if (state.kind !== "ready") return;
-    editorMounting = true;
-    const markdown = effectiveMarkdown(state);
-    try {
-      const { mountWorkingDraftEditor } = await import("./working-draft-editor.js");
-      const ed = await mountWorkingDraftEditor({
-        root: editorCanvas,
-        markdown,
-        onHumanMarkdown: (value) => {
-          const current = controller.getState();
-          if (current.kind !== "ready" || current.commitPending) return;
-          controller.updateMarkdown(value, "human");
-        },
-      });
-      if (!editorMounting) {
-        void ed.destroy();
-        return;
-      }
-      editor = ed;
-      editorMounting = false;
-      render(controller.getState(), "workspace-reset");
-    } catch {
-      editorMounting = false;
+    if (state.kind !== "ready") {
+      destroyEditor();
+      return;
     }
+
+    if (!editor && !editorMounting && !editorError) {
+      void mountEditor();
+    }
+    if (!editor) {
+      renderEditorState();
+      return;
+    }
+
+    const markdown = effectiveMarkdown(state);
+    if (reason === "webmcp-replace") {
+      editor.replaceMarkdown({ markdown, history: "record" });
+    } else if (reason === "workspace-reset") {
+      editor.replaceMarkdown({ markdown, history: "reset" });
+    }
+    editor.setReadOnly(state.commitPending);
+    renderEditorState();
   };
 
   keyForm.addEventListener("submit", (event) => {
@@ -257,11 +439,11 @@ function createView(
   });
   changeKey.addEventListener("click", () => {
     destroyEditor();
-    keyForm.hidden = false;
+    keyGate.hidden = false;
+    layout.hidden = true;
+    loadMessage.hidden = true;
     keyInput.value = "";
     keyInput.focus();
-    layout.hidden = true;
-    loadMessage.textContent = "";
   });
   commit.addEventListener("click", () => void controller.commit());
   overflow.addEventListener("click", () => showOverflow(!overflowOpen));
@@ -272,12 +454,16 @@ function createView(
     showOverflow(false);
     controller.discard();
   });
+  editorRetry.addEventListener("click", () => {
+    editorError = false;
+    render(controller.getState(), "workspace-reset");
+  });
   copyCode.addEventListener("click", () => {
     const state = controller.getState();
     const code = state.kind === "ready" ? state.code : routeCode;
     void navigator.clipboard.writeText(code);
   });
-  document.addEventListener("click", (event) => {
+  const documentClickHandler = (event: MouseEvent): void => {
     if (!overflowOpen) return;
     if (
       event.target instanceof Node &&
@@ -286,88 +472,34 @@ function createView(
     ) {
       showOverflow(false);
     }
-  });
+  };
+  document.addEventListener("click", documentClickHandler);
 
-  function render(state: WorkspaceState, reason: MarkdownChangeReason): void {
-    const isReady = state.kind === "ready";
-    const isLoading = state.kind === "loading";
-    const isNeedsKey = state.kind === "needs-space-key";
-    const isLoadError = state.kind === "load-error";
-
-    keyForm.hidden = !isNeedsKey && !isLoadError;
-    layout.hidden = !isReady;
-    loadMessage.textContent = isLoading
-      ? "Loading the committed Revision…"
-      : isLoadError
-        ? describeError(state.error)
-        : "";
-
-    if (isNeedsKey) {
-      keyMessage.textContent = state.inputError ? describeError(state.inputError) : "";
-    } else {
-      keyMessage.textContent = "";
-    }
-
-    if (!isReady) {
+  return {
+    render,
+    destroy(): void {
+      if (destroyed) return;
+      destroyed = true;
+      document.removeEventListener("click", documentClickHandler);
       destroyEditor();
-      return;
-    }
-
-    if (!editor && !editorMounting) {
-      void mountEditor();
-      return;
-    }
-    if (editorMounting) return;
-    if (!editor) return;
-
-    const markdown = effectiveMarkdown(state);
-    if (reason === "human-edit") {
-      // Editor already contains the Human change; no replacement needed.
-    } else if (reason === "webmcp-replace") {
-      editor.replaceMarkdown({ markdown, history: "record" });
-    } else if (reason === "workspace-reset") {
-      editor.replaceMarkdown({ markdown, history: "reset" });
-    }
-    editor.setReadOnly(state.commitPending);
-
-    workingDraftMeta.textContent = draftStatusText(state);
-    statusPill.textContent = topbarStatusText(state);
-    statusPill.className = `workspace-status-pill ${state.workingDraft ? "workspace-status-pill-active" : ""}`;
-    topbarTitle.textContent = `Handoff ${state.code}`;
-    handoffCode.textContent = state.code;
-    commit.disabled = state.workingDraft === null || state.commitPending;
-    discardMenuItem.disabled = state.workingDraft === null || state.commitPending;
-    discardConfirmAction.disabled = state.workingDraft === null || state.commitPending;
-    actionMessage.textContent = state.commitPending
-      ? "Committing Revision…"
-      : state.actionError
-        ? describeError(state.actionError)
-        : "";
-  }
-
-  return { render };
+    },
+  };
 }
 
-function draftStatusText(state: Extract<WorkspaceState, { kind: "ready" }>): string {
+function draftStatusText(state: ReadyWorkspaceState): string {
   if (!state.workingDraft) return "No local draft";
   if (state.commitPending) return "Commit pending";
   if (state.actionError) return "Recoverable error";
   return state.workingDraft.lastModifiedVia === "human" ? "Edited by you" : "Updated by WebMCP";
 }
 
-function topbarStatusText(state: Extract<WorkspaceState, { kind: "ready" }>): string {
+function topbarStatusText(state: ReadyWorkspaceState): string {
   if (state.commitPending) return "Committing Revision…";
   if (state.actionError) return "Draft error";
   if (!state.workingDraft) return "No local Working Draft";
   return state.workingDraft.lastModifiedVia === "human"
     ? "Draft saved locally · Human"
     : "Draft saved locally · WebMCP";
-}
-
-function formatExpiry(expiresAt: string): string {
-  const timestamp = Date.parse(expiresAt);
-  if (Number.isNaN(timestamp)) return "later";
-  return new Date(timestamp).toLocaleString();
 }
 
 function describeError(error: WorkspaceError): string {
