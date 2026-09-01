@@ -110,6 +110,73 @@ describe("Handoff Workspace UI", () => {
     expect(layout?.hasAttribute("hidden")).toBe(false);
     expect(root.querySelector(".workspace-context-title")?.textContent).toBe("TaskDrop Handoff");
     expect(root.querySelector(".workspace-context-meta")?.textContent).toContain("Revision 1");
+    expect(root.querySelector(".workspace-context-meta")?.textContent).toContain(
+      "Latest Revision 1",
+    );
+    expect(root.querySelector(".workspace-context-meta")?.textContent).toContain(
+      "Expires 2026-08-29 08:00 UTC",
+    );
+
+    root.remove();
+  });
+
+  it("surfaces a gated committed Markdown value in sanitized read-only mode", async () => {
+    const { createHandoffWorkspaceController } =
+      await import("../../web/handoff-workspace-controller.js");
+    const { mountWorkingDraftEditor } = await import("../../web/working-draft-editor.js");
+    const { mountHandoffWorkspace } = await import("../../web/handoff-workspace.js");
+
+    const ready: Extract<WorkspaceState, { kind: "ready" }> = {
+      kind: "ready",
+      code: "ABC001",
+      committed: {
+        ok: true,
+        code: "ABC001",
+        revision: 1,
+        latestRevision: 1,
+        isLatest: true,
+        markdown: '<script>alert("xss")</script>\n\n# Preserved',
+        contentSanitized: false,
+        redactionCount: 0,
+        origin: "mcp",
+        createdAt: "2026-08-28T08:00:00.000Z",
+        expiresAt: "2026-08-29T08:00:00.000Z",
+      },
+      workingDraft: null,
+      commitPending: false,
+      actionError: null,
+    };
+    const controller: HandoffWorkspaceController = {
+      getState: () => ready,
+      subscribe: () => () => {},
+      open: async () => {},
+      submitSpaceKey: async () => {},
+      getRevisionHistory: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
+      readRevision: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
+      updateMarkdown: () => ({ ok: true }),
+      discard: () => {},
+      commit: async () => ({ ok: false, error: { code: "NO_WORKING_DRAFT" } }),
+    };
+
+    vi.mocked(createHandoffWorkspaceController).mockReturnValue(controller);
+    vi.mocked(mountWorkingDraftEditor).mockClear();
+
+    const root = document.createElement("div");
+    document.body.append(root);
+    await mountHandoffWorkspace(root, "ABC001");
+    await wait(0);
+
+    expect(mountWorkingDraftEditor).not.toHaveBeenCalled();
+    expect(root.querySelector<HTMLElement>(".workspace-editor-fallback")?.hidden).toBe(false);
+    expect(root.querySelector(".workspace-editor-fallback-message")?.textContent).toContain(
+      "raw HTML",
+    );
+    expect(root.querySelector(".workspace-editor-fallback-content")?.innerHTML).not.toContain(
+      "<script",
+    );
+    expect(root.querySelector(".workspace-editor-fallback-content")?.textContent).toContain(
+      "Preserved",
+    );
 
     root.remove();
   });
@@ -241,6 +308,16 @@ describe("Handoff Workspace UI", () => {
     document.body.append(root);
     await mountHandoffWorkspace(root, "ABC001");
     await wait(0);
+
+    expect(root.querySelector(".workspace-history-detail")?.textContent).toContain(
+      "Based on Revision 1",
+    );
+    expect(root.querySelector(".workspace-history-detail")?.textContent).toContain(
+      "Last modified: WebMCP",
+    );
+    expect(root.querySelector(".workspace-history-detail")?.textContent).toContain(
+      "Contributors: WebMCP",
+    );
 
     if (!listener) throw new Error("Expected listener to be registered");
     listener(ready, "webmcp-replace");

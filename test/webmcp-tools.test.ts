@@ -219,6 +219,21 @@ describe("Handoff WebMCP tools", () => {
     });
   });
 
+  it("rejects a known rich-path blocker without changing the shared Draft", async () => {
+    const controller = await readyController();
+    const tools = createHandoffWebMcpTools(controller);
+
+    await expect(
+      execute(tool(tools, "update_working_draft"), {
+        markdown: "![remote](https://example.com/image.png)",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      error: { code: "RICH_DRAFT_UNSUPPORTED", blocker: "image" },
+    });
+    expect(controller.getState()).toMatchObject({ kind: "ready", workingDraft: null });
+  });
+
   it("commits from Draft provenance and returns structured no-Draft, empty, and conflict results", async () => {
     const conflict = {
       ok: false as const,

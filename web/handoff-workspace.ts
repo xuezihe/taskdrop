@@ -9,6 +9,11 @@ import {
   type WorkspaceState,
 } from "./handoff-workspace-controller.js";
 import { createSessionWorkingDraftStorage } from "./handoff-session-storage.js";
+import { renderMarkdownToHtml } from "./markdown-preview.js";
+import {
+  checkRichWorkingDraftMarkdown,
+  type RichWorkingDraftBlocker,
+} from "./rich-working-draft-gate.js";
 import type { WorkingDraftEditor } from "./working-draft-editor.js";
 import { bindHandoffWebMcpTools } from "./webmcp-registration.js";
 
@@ -118,7 +123,10 @@ function createView(
   const workingDraftMeta = document.createElement("span");
   workingDraftMeta.className = "workspace-history-meta";
   workingDraftMeta.textContent = "No local draft";
-  workingDraftBody.append(workingDraftName, workingDraftMeta);
+  const workingDraftDetails = document.createElement("span");
+  workingDraftDetails.className = "workspace-history-detail";
+  workingDraftDetails.hidden = true;
+  workingDraftBody.append(workingDraftName, workingDraftMeta, workingDraftDetails);
   workingDraftRow.append(workingDraftMarker, workingDraftBody);
   historyList.append(workingDraftRow);
   const historyEmpty = document.createElement("p");
@@ -173,7 +181,8 @@ function createView(
   contextMeta.className = "workspace-context-meta";
   const contextCode = document.createElement("span");
   const contextRevision = document.createElement("span");
-  contextMeta.append(contextCode, contextRevision);
+  const contextExpiry = document.createElement("span");
+  contextMeta.append(contextCode, contextRevision, contextExpiry);
   documentContext.append(contextTitle, contextMeta);
 
   const statusPill = document.createElement("span");
@@ -244,7 +253,15 @@ function createView(
   editorRetry.textContent = "Retry";
   editorRetry.hidden = true;
   editorState.append(editorStateText, editorRetry);
-  editorViewport.append(editorState, editorRoot);
+  const editorFallback = document.createElement("article");
+  editorFallback.className = "workspace-editor-fallback";
+  editorFallback.hidden = true;
+  const editorFallbackText = document.createElement("p");
+  editorFallbackText.className = "workspace-editor-fallback-message";
+  const editorFallbackContent = document.createElement("div");
+  editorFallbackContent.className = "workspace-editor-fallback-content";
+  editorFallback.append(editorFallbackText, editorFallbackContent);
+  editorViewport.append(editorState, editorFallback, editorRoot);
 
   documentPanel.append(contextBar, actionMessage, editorViewport);
   layout.append(sidebar, documentPanel);
@@ -259,11 +276,20 @@ function createView(
   let mountSequence = 0;
   let overflowOpen = false;
   let destroyed = false;
+  let editorUnsupported: RichWorkingDraftBlocker | null = null;
 
   const effectiveMarkdown = (state: ReadyWorkspaceState): string =>
     state.workingDraft?.markdown ?? state.committed.markdown;
 
   const renderEditorState = (): void => {
+    if (editorUnsupported) {
+      editorRoot.hidden = true;
+      editorState.hidden = true;
+      editorFallback.hidden = false;
+      return;
+    }
+
+    editorFallback.hidden = true;
     if (editor) {
       editorRoot.hidden = false;
       editorState.hidden = true;
@@ -286,6 +312,19 @@ function createView(
     }
   };
 
+  const showUnsupportedMarkdown = (markdown: string, blocker: RichWorkingDraftBlocker): void => {
+    editorUnsupported = blocker;
+    editorFallbackText.textContent = describeRichWorkingDraftBlocker(blocker);
+    editorFallbackContent.innerHTML = renderMarkdownToHtml(markdown);
+    renderEditorState();
+  };
+
+  const clearUnsupportedMarkdown = (): void => {
+    editorUnsupported = null;
+    editorFallbackText.textContent = "";
+    editorFallbackContent.replaceChildren();
+  };
+
   const destroyEditor = (): void => {
     mountSequence += 1;
     editorMounting = false;
@@ -303,6 +342,12 @@ function createView(
     if (destroyed || editor || editorMounting || editorError) return;
     const state = controller.getState();
     if (state.kind !== "ready") return;
+    const markdown = effectiveMarkdown(state);
+    const gate = checkRichWorkingDraftMarkdown(markdown);
+    if (!gate.allowed) {
+      showUnsupportedMarkdown(markdown, gate.blocker);
+      return;
+    }
 
     const sequence = ++mountSequence;
     editorMounting = true;
@@ -317,13 +362,26 @@ function createView(
       const { mountWorkingDraftEditor } = await import("./working-draft-editor.js");
       const current = controller.getState();
       if (current.kind !== "ready") return;
+      const currentMarkdown = effectiveMarkdown(current);
+      const currentGate = checkRichWorkingDraftMarkdown(currentMarkdown);
+      if (!currentGate.allowed) {
+        editorMounting = false;
+        showUnsupportedMarkdown(currentMarkdown, currentGate.blocker);
+        return;
+      }
       const mountedEditor = await mountWorkingDraftEditor({
         root: editorRoot,
-        markdown: effectiveMarkdown(current),
+        markdown: currentMarkdown,
         onHumanMarkdown: (value) => {
           const latest = controller.getState();
           if (latest.kind !== "ready" || latest.commitPending) return;
-          controller.updateMarkdown(value, "human");
+          const update = controller.updateMarkdown(value, "human");
+          if (!update.ok && editor) {
+            editor.replaceMarkdown({
+              markdown: effectiveMarkdown(latest),
+              history: "reset",
+            });
+          }
         },
       });
 
@@ -377,8 +435,11 @@ function createView(
     if (!isReady) {
       contextCode.textContent = "";
       contextRevision.textContent = "";
+      contextExpiry.textContent = "";
       statusPill.textContent = isLoading ? "Loading" : "Open a Handoff";
       statusPill.className = "workspace-status-pill";
+      workingDraftDetails.hidden = true;
+      workingDraftDetails.textContent = "";
       commit.disabled = true;
       discardMenuItem.disabled = true;
       discardConfirmAction.disabled = true;
@@ -388,12 +449,15 @@ function createView(
     }
 
     contextCode.textContent = state.code;
-    contextRevision.textContent = `Revision ${state.committed.revision}`;
+    contextRevision.textContent = `Latest Revision ${state.committed.latestRevision}`;
+    contextExpiry.textContent = `Expires ${formatExpiry(state.committed.expiresAt)}`;
     statusPill.textContent = topbarStatusText(state);
     statusPill.className = `workspace-status-pill ${
       state.workingDraft ? "workspace-status-pill-active" : ""
     }`;
     workingDraftMeta.textContent = draftStatusText(state);
+    workingDraftDetails.hidden = state.workingDraft === null;
+    workingDraftDetails.textContent = draftMetadataText(state);
     handoffCode.textContent = state.code;
     commit.disabled = state.workingDraft === null || state.commitPending;
     discardMenuItem.disabled = state.workingDraft === null || state.commitPending;
@@ -411,9 +475,19 @@ function createView(
     renderState(state);
 
     if (state.kind !== "ready") {
+      clearUnsupportedMarkdown();
       destroyEditor();
       return;
     }
+
+    const markdown = effectiveMarkdown(state);
+    const gate = checkRichWorkingDraftMarkdown(markdown);
+    if (!gate.allowed) {
+      destroyEditor();
+      showUnsupportedMarkdown(markdown, gate.blocker);
+      return;
+    }
+    clearUnsupportedMarkdown();
 
     if (!editor && !editorMounting && !editorError) {
       void mountEditor();
@@ -423,7 +497,6 @@ function createView(
       return;
     }
 
-    const markdown = effectiveMarkdown(state);
     if (reason === "webmcp-replace") {
       editor.replaceMarkdown({ markdown, history: "record" });
     } else if (reason === "workspace-reset") {
@@ -518,6 +591,8 @@ function describeError(error: WorkspaceError): string {
       return "Open the Handoff before editing or reading its Workspace.";
     case "COMMIT_IN_PROGRESS":
       return "Wait for the current Commit to finish before editing.";
+    case "RICH_DRAFT_UNSUPPORTED":
+      return describeRichWorkingDraftBlocker(error.blocker);
     case "REQUEST_CANCELLED":
       return "The Handoff request was cancelled. Your local Draft is preserved.";
     case "NETWORK_ERROR":
@@ -542,5 +617,34 @@ function describeError(error: WorkspaceError): string {
       return "The Handoff request was not accepted. Your local Draft is preserved.";
     case "INTERNAL_ERROR":
       return "The Handoff service failed this request. Your local Draft is preserved.";
+  }
+}
+
+function formatExpiry(expiresAt: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(expiresAt);
+  return match ? `${match[1]} ${match[2]} UTC` : expiresAt;
+}
+
+function draftMetadataText(state: ReadyWorkspaceState): string {
+  const draft = state.workingDraft;
+  if (!draft) return "";
+  const contributors = draft.contributors
+    .map((surface) => (surface === "human" ? "Human" : "WebMCP"))
+    .join(" · ");
+  return `Based on Revision ${draft.baseRevision} · Last modified: ${
+    draft.lastModifiedVia === "human" ? "Human" : "WebMCP"
+  } · Contributors: ${contributors || "None"}`;
+}
+
+function describeRichWorkingDraftBlocker(blocker: RichWorkingDraftBlocker): string {
+  switch (blocker) {
+    case "raw-html":
+      return "This content contains raw HTML that is not accepted by the rich Working Draft editor. The Markdown is preserved in a sanitized read-only view.";
+    case "image":
+      return "This content contains an image. Images are not accepted by the rich Working Draft editor, so the Markdown is preserved in a sanitized read-only view.";
+    case "table":
+      return "This content contains a table. Tables are not accepted by the current rich Working Draft editor, so the Markdown is preserved in a sanitized read-only view.";
+    case "unsafe-link":
+      return "This content contains an unsafe link protocol and cannot enter the rich Working Draft editor.";
   }
 }

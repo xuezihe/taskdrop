@@ -49,6 +49,21 @@ describe("Markdown preview rendering", () => {
     expect(html).not.toContain("<embed");
   });
 
+  it("does not create external-resource elements in read-only rendering", () => {
+    const html = render(
+      '![remote](https://evil.example/image.png "title")\n\n<div style="background: url(https://evil.example/track)">text</div>',
+    );
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("evil.example");
+    expect(html).not.toContain("style=");
+  });
+
+  it("does not preserve external SVG resources in read-only rendering", () => {
+    const html = render('<svg><image href="https://evil.example/track" /></svg>');
+    expect(html).not.toContain("<svg");
+    expect(html).not.toContain("evil.example");
+  });
+
   it("preserves safe inline HTML when present in Markdown", () => {
     const html = render("This has <em>emphasis</em> and <strong>bold</strong> inline.");
     expect(html).toContain("<em>emphasis</em>");

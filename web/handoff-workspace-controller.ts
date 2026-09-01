@@ -12,6 +12,10 @@ import {
   type EditSurface,
   type WorkingDraft,
 } from "./working-draft.js";
+import {
+  checkRichWorkingDraftMarkdown,
+  type RichWorkingDraftBlocker,
+} from "./rich-working-draft-gate.js";
 import type {
   BrowserApiClient,
   BrowserApiError,
@@ -28,7 +32,8 @@ export type WorkspaceLocalError =
   | { code: "EMPTY_MARKDOWN" }
   | { code: "DRAFT_STORAGE_ERROR" }
   | { code: "WORKSPACE_NOT_READY" }
-  | { code: "COMMIT_IN_PROGRESS" };
+  | { code: "COMMIT_IN_PROGRESS" }
+  | { code: "RICH_DRAFT_UNSUPPORTED"; blocker: RichWorkingDraftBlocker };
 
 export type WorkspaceError = BrowserApiError | BrowserClientError | WorkspaceLocalError;
 
@@ -239,6 +244,13 @@ export function createHandoffWorkspaceController(
       }
       if (state.commitPending) {
         return { ok: false, error: { code: "COMMIT_IN_PROGRESS" } };
+      }
+      const gate = checkRichWorkingDraftMarkdown(markdown);
+      if (!gate.allowed) {
+        return {
+          ok: false,
+          error: { code: "RICH_DRAFT_UNSUPPORTED", blocker: gate.blocker },
+        };
       }
       const draft = state.workingDraft
         ? updateWorkingDraft(state.workingDraft, markdown, surface, now())

@@ -367,6 +367,33 @@ describe("Handoff Workspace controller", () => {
     });
   });
 
+  it("rejects known rich-path blockers before changing the Draft", async () => {
+    const storage = new MemoryStorage();
+    const controller = createController(
+      storage,
+      new Map([[SPACE_KEY, fakeClient(success(revision()))]]),
+    );
+
+    await controller.submitSpaceKey(SPACE_KEY);
+    expect(controller.updateMarkdown("# Allowed", "webmcp")).toEqual({ ok: true });
+    const before = readyState(controller).workingDraft;
+
+    expect(controller.updateMarkdown("![remote](https://example.com/image.png)", "webmcp")).toEqual(
+      {
+        ok: false,
+        error: { code: "RICH_DRAFT_UNSUPPORTED", blocker: "image" },
+      },
+    );
+    expect(readyState(controller).workingDraft).toBe(before);
+
+    const reloaded = createController(
+      storage,
+      new Map([[SPACE_KEY, fakeClient(success(revision()))]]),
+    );
+    await reloaded.submitSpaceKey(SPACE_KEY);
+    expect(readyState(reloaded).workingDraft).toEqual(before);
+  });
+
   describe("markdown change reasons", () => {
     it("emits workspace-reset when the Handoff loads", async () => {
       const storage = new MemoryStorage();

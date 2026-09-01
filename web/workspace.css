@@ -220,6 +220,15 @@
   line-height: 1.35;
 }
 
+.workspace-history-detail {
+  display: block;
+  max-width: 240px;
+  margin-top: 5px;
+  color: var(--workspace-muted);
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
 .workspace-history-empty {
   max-width: 180px;
   margin: 18px 0 0 24px;
@@ -292,6 +301,7 @@
 
 .workspace-context-meta {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   margin-top: 5px;
   color: var(--workspace-muted);
@@ -611,6 +621,44 @@
   font-size: 0.9rem;
 }
 
+.workspace-editor-fallback {
+  width: min(100%, 960px);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 32px;
+  color: var(--workspace-ink);
+}
+
+.workspace-editor-fallback-message {
+  margin: 0 0 24px;
+  color: var(--workspace-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.workspace-editor-fallback-content {
+  overflow-wrap: anywhere;
+}
+
+.workspace-editor-fallback-content :first-child {
+  margin-top: 0;
+}
+
+.workspace-editor-fallback-content pre {
+  overflow-x: auto;
+  border: 1px solid var(--workspace-line);
+  border-radius: 6px;
+  padding: 16px;
+  background: var(--workspace-surface-soft);
+}
+
+.workspace-editor-fallback-content blockquote {
+  margin-inline: 0;
+  border-left: 3px solid var(--workspace-focus);
+  padding-left: 16px;
+  color: var(--workspace-muted);
+}
+
 .workspace-editor-retry {
   min-height: 36px;
 }
@@ -716,6 +764,11 @@
     font-size: 0.85rem;
   }
 
+  .workspace-context-meta {
+    gap: 6px 10px;
+    font-size: 0.68rem;
+  }
+
   .workspace-action-message {
     padding-inline: 16px;
   }
@@ -726,6 +779,10 @@
 
   .workspace-editor-root .milkdown .editor h1 {
     font-size: 2rem;
+  }
+
+  .workspace-editor-fallback {
+    padding: 28px 20px 72px;
   }
 }
 
