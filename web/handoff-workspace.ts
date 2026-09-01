@@ -6,6 +6,7 @@ import {
   createHandoffWorkspaceController,
   type HandoffWorkspaceController,
   type MarkdownChangeReason,
+  type RevisionConflictChoice,
   type WorkspaceError,
   type WorkspaceState,
 } from "./handoff-workspace-controller.js";
@@ -266,6 +267,38 @@ function createView(
   actionMessage.setAttribute("aria-live", "polite");
   actionMessage.hidden = true;
 
+  const conflictPanel = document.createElement("section");
+  conflictPanel.className = "workspace-conflict-panel";
+  conflictPanel.setAttribute("aria-labelledby", "workspace-conflict-title");
+  conflictPanel.hidden = true;
+  const conflictTitle = document.createElement("h2");
+  conflictTitle.id = "workspace-conflict-title";
+  conflictTitle.textContent = "This Handoff changed while you were editing.";
+  const conflictSummary = document.createElement("div");
+  conflictSummary.className = "workspace-conflict-summary";
+  const conflictDraft = document.createElement("p");
+  const conflictLatest = document.createElement("p");
+  conflictSummary.append(conflictDraft, conflictLatest);
+  const conflictActions = document.createElement("div");
+  conflictActions.className = "workspace-conflict-actions";
+  const useServerLatest = document.createElement("button");
+  useServerLatest.type = "button";
+  useServerLatest.className = "workspace-secondary workspace-conflict-choice";
+  useServerLatest.dataset.conflictChoice = "use-server-latest";
+  useServerLatest.textContent = "Use Server Latest";
+  const keepWorkingDraft = document.createElement("button");
+  keepWorkingDraft.type = "button";
+  keepWorkingDraft.className = "workspace-commit-button workspace-conflict-choice";
+  keepWorkingDraft.dataset.conflictChoice = "keep-working-draft";
+  keepWorkingDraft.textContent = "Keep My Draft as New Latest";
+  conflictActions.append(useServerLatest, keepWorkingDraft);
+  const conflictMessage = document.createElement("p");
+  conflictMessage.className = "workspace-conflict-message";
+  conflictMessage.setAttribute("role", "status");
+  conflictMessage.setAttribute("aria-live", "polite");
+  conflictMessage.hidden = true;
+  conflictPanel.append(conflictTitle, conflictSummary, conflictActions, conflictMessage);
+
   const editorViewport = document.createElement("div");
   editorViewport.className = "workspace-editor-viewport";
   const editorRoot = document.createElement("div");
@@ -321,7 +354,13 @@ function createView(
   historicalContent.className = "workspace-history-document-content";
   historicalViewport.append(historicalHeader, historicalState, historicalContent);
 
-  documentPanel.append(contextBar, actionMessage, editorViewport, historicalViewport);
+  documentPanel.append(
+    contextBar,
+    actionMessage,
+    conflictPanel,
+    editorViewport,
+    historicalViewport,
+  );
   layout.append(sidebar, documentPanel);
   shell.append(keyGate, loadMessage, layout);
   root.replaceChildren(shell);
@@ -340,6 +379,7 @@ function createView(
   let documentSelection: DocumentSelection = { kind: "working-draft" };
   let historyRequestToken = 0;
   let revisionReadToken = 0;
+  let conflictResolutionError: WorkspaceError | null = null;
 
   const effectiveMarkdown = (state: ReadyWorkspaceState): string =>
     state.workingDraft?.markdown ?? state.committed.markdown;
@@ -681,6 +721,8 @@ function createView(
       discardMenuItem.disabled = true;
       discardConfirmAction.disabled = true;
       actionMessage.hidden = true;
+      conflictPanel.hidden = true;
+      conflictResolutionError = null;
       renderEditorState();
       return;
     }
@@ -697,15 +739,39 @@ function createView(
     workingDraftDetails.textContent = draftMetadataText(state);
     handoffCode.textContent = state.code;
     const historySelected = isHistoricalSelection();
-    commit.disabled = historySelected || state.workingDraft === null || state.commitPending;
+    const conflict = state.actionError?.code === "REVISION_CONFLICT" ? state.actionError : null;
+    const hasConflict = conflict !== null && state.workingDraft !== null;
+    if (!hasConflict) conflictResolutionError = null;
+    conflictPanel.hidden = !hasConflict;
+    if (hasConflict && state.workingDraft) {
+      conflictDraft.textContent = `Your Working Draft · Based on Revision ${state.workingDraft.baseRevision}`;
+      conflictLatest.textContent = `Server Latest · Revision ${conflict.expectedRevision}`;
+      conflictMessage.hidden = conflictResolutionError === null;
+      conflictMessage.textContent = conflictResolutionError
+        ? describeError(conflictResolutionError)
+        : "";
+    } else {
+      conflictDraft.textContent = "";
+      conflictLatest.textContent = "";
+      conflictMessage.hidden = true;
+      conflictMessage.textContent = "";
+    }
+    useServerLatest.disabled = !hasConflict || state.commitPending;
+    keepWorkingDraft.disabled = !hasConflict || state.commitPending;
+    commit.disabled =
+      historySelected || hasConflict || state.workingDraft === null || state.commitPending;
     discardMenuItem.disabled =
-      historySelected || state.workingDraft === null || state.commitPending;
+      historySelected || hasConflict || state.workingDraft === null || state.commitPending;
     discardConfirmAction.disabled =
-      historySelected || state.workingDraft === null || state.commitPending;
+      historySelected || hasConflict || state.workingDraft === null || state.commitPending;
     const message = state.commitPending
-      ? "Committing Revision…"
+      ? hasConflict
+        ? "Resolving Revision conflict…"
+        : "Committing Revision…"
       : state.actionError
-        ? describeError(state.actionError)
+        ? hasConflict
+          ? ""
+          : describeError(state.actionError)
         : "";
     actionMessage.hidden = message.length === 0;
     actionMessage.textContent = message;
@@ -812,12 +878,27 @@ function createView(
     requestHistory(state.committed);
   }
 
+  async function resolveConflict(choice: RevisionConflictChoice): Promise<void> {
+    const state = controller.getState();
+    if (state.kind !== "ready" || state.actionError?.code !== "REVISION_CONFLICT") return;
+    conflictResolutionError = null;
+    renderState(state);
+    const result = await controller.resolveRevisionConflict(choice);
+    if (!result.ok && result.error.code !== "REVISION_CONFLICT") {
+      conflictResolutionError = result.error;
+      const current = controller.getState();
+      if (current.kind === "ready") renderState(current);
+    }
+  }
+
   keyForm.addEventListener("submit", (event) => {
     event.preventDefault();
     void controller.submitSpaceKey(keyInput.value);
   });
   workingDraftButton.addEventListener("click", showWorkingDraft);
   historyRetry.addEventListener("click", retryHistory);
+  useServerLatest.addEventListener("click", () => void resolveConflict("use-server-latest"));
+  keepWorkingDraft.addEventListener("click", () => void resolveConflict("keep-working-draft"));
   historicalReturn.addEventListener("click", showWorkingDraft);
   historicalRetry.addEventListener("click", () => {
     if (
@@ -880,13 +961,21 @@ function createView(
 
 function draftStatusText(state: ReadyWorkspaceState): string {
   if (!state.workingDraft) return "No local draft";
+  if (state.commitPending && state.actionError?.code === "REVISION_CONFLICT") {
+    return "Conflict resolution pending";
+  }
   if (state.commitPending) return "Commit pending";
+  if (state.actionError?.code === "REVISION_CONFLICT") return "Conflict needs resolution";
   if (state.actionError) return "Recoverable error";
   return state.workingDraft.lastModifiedVia === "human" ? "Edited by you" : "Updated by WebMCP";
 }
 
 function topbarStatusText(state: ReadyWorkspaceState): string {
+  if (state.commitPending && state.actionError?.code === "REVISION_CONFLICT") {
+    return "Resolving Revision conflict…";
+  }
   if (state.commitPending) return "Committing Revision…";
+  if (state.actionError?.code === "REVISION_CONFLICT") return "Revision conflict";
   if (state.actionError) return "Draft error";
   if (!state.workingDraft) return "No local Working Draft";
   return state.workingDraft.lastModifiedVia === "human"
@@ -910,6 +999,8 @@ function describeError(error: WorkspaceError): string {
       return "Open the Handoff before editing or reading its Workspace.";
     case "COMMIT_IN_PROGRESS":
       return "Wait for the current Commit to finish before editing.";
+    case "NO_REVISION_CONFLICT":
+      return "There is no active Revision conflict to resolve.";
     case "RICH_DRAFT_UNSUPPORTED":
       return describeRichWorkingDraftBlocker(error.blocker);
     case "REQUEST_CANCELLED":

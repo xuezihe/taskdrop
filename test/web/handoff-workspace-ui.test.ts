@@ -127,6 +127,10 @@ describe("Handoff Workspace UI", () => {
       updateMarkdown: () => ({ ok: true }),
       discard: () => {},
       commit: async () => ({ ok: false, error: { code: "NO_WORKING_DRAFT" } }),
+      resolveRevisionConflict: async () => ({
+        ok: false,
+        error: { code: "WORKSPACE_NOT_READY" },
+      }),
     };
 
     vi.mocked(createHandoffWorkspaceController).mockReturnValue(controller);
@@ -199,6 +203,10 @@ describe("Handoff Workspace UI", () => {
       updateMarkdown: () => ({ ok: true }),
       discard: () => {},
       commit: async () => ({ ok: false, error: { code: "NO_WORKING_DRAFT" } }),
+      resolveRevisionConflict: async () => ({
+        ok: false,
+        error: { code: "WORKSPACE_NOT_READY" },
+      }),
     };
 
     vi.mocked(createHandoffWorkspaceController).mockReturnValue(controller);
@@ -296,6 +304,10 @@ describe("Handoff Workspace UI", () => {
       updateMarkdown,
       discard,
       commit,
+      resolveRevisionConflict: async () => ({
+        ok: false,
+        error: { code: "WORKSPACE_NOT_READY" },
+      }),
     };
 
     vi.mocked(createHandoffWorkspaceController).mockReturnValue(controller);
@@ -363,6 +375,100 @@ describe("Handoff Workspace UI", () => {
     expect(root.querySelector(".workspace-history-detail")?.textContent).toContain(
       "Based on Revision 3",
     );
+
+    root.remove();
+  });
+
+  it("shows explicit conflict choices and keeps the panel after a resolution failure", async () => {
+    const { createHandoffWorkspaceController } =
+      await import("../../web/handoff-workspace-controller.js");
+    const { mountWorkingDraftEditor } = await import("../../web/working-draft-editor.js");
+    const { mountHandoffWorkspace } = await import("../../web/handoff-workspace.js");
+
+    const initial = readyState({
+      workingDraft: {
+        handoffCode: "ABC001",
+        baseRevision: 1,
+        markdown: "# Local Draft",
+        lastModifiedVia: "human",
+        contributors: ["human"],
+        updatedAt: "2026-08-28T08:01:00.000Z",
+      },
+    });
+    const conflict = {
+      ok: false as const,
+      error: { code: "REVISION_CONFLICT" as const, expectedRevision: 2, receivedBaseRevision: 1 },
+    };
+    let currentState: WorkspaceState = initial;
+    let listener:
+      | ((
+          state: WorkspaceState,
+          reason: import("../../web/handoff-workspace-controller.js").MarkdownChangeReason,
+        ) => void)
+      | undefined;
+    const resolveRevisionConflict = vi
+      .fn<HandoffWorkspaceController["resolveRevisionConflict"]>()
+      .mockResolvedValue({ ok: false, error: { code: "NETWORK_ERROR" } });
+    const controller: HandoffWorkspaceController = {
+      getState: () => currentState,
+      subscribe: (nextListener) => {
+        listener = nextListener;
+        return () => {
+          listener = undefined;
+        };
+      },
+      open: async () => {
+        listener?.(currentState, "workspace-reset");
+      },
+      submitSpaceKey: async () => {},
+      getRevisionHistory: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
+      readRevision: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
+      updateMarkdown: () => ({ ok: true }),
+      discard: () => {},
+      commit: async () => conflict,
+      resolveRevisionConflict,
+    };
+
+    vi.mocked(createHandoffWorkspaceController).mockReturnValue(controller);
+    vi.mocked(mountWorkingDraftEditor).mockResolvedValue({
+      replaceMarkdown: vi.fn(),
+      setReadOnly: vi.fn(),
+      destroy: async () => {},
+    });
+
+    const root = document.createElement("div");
+    document.body.append(root);
+    await mountHandoffWorkspace(root, "ABC001");
+    await wait(0);
+
+    currentState = { ...initial, actionError: conflict.error };
+    listener?.(currentState, null);
+
+    const panel = root.querySelector<HTMLElement>(".workspace-conflict-panel");
+    expect(panel?.hidden).toBe(false);
+    expect(panel?.textContent).toContain("Based on Revision 1");
+    expect(panel?.textContent).toContain("Server Latest");
+    expect(panel?.textContent).toContain("Revision 2");
+    expect(root.querySelector<HTMLButtonElement>(".workspace-commit-button")?.disabled).toBe(true);
+
+    root.querySelector<HTMLButtonElement>('[data-conflict-choice="use-server-latest"]')?.click();
+    await wait(0);
+    expect(resolveRevisionConflict).toHaveBeenCalledWith("use-server-latest");
+    expect(panel?.textContent).toContain("could not be reached");
+
+    resolveRevisionConflict.mockResolvedValueOnce({
+      ok: true,
+      value: {
+        ...initial.committed,
+        revision: 3,
+        latestRevision: 3,
+        markdown: "# Kept Draft",
+        origin: "human",
+      },
+    });
+    root.querySelector<HTMLButtonElement>('[data-conflict-choice="keep-working-draft"]')?.click();
+    await wait(0);
+    expect(resolveRevisionConflict).toHaveBeenLastCalledWith("keep-working-draft");
 
     root.remove();
   });
@@ -438,6 +544,10 @@ describe("Handoff Workspace UI", () => {
       updateMarkdown: () => ({ ok: true }),
       discard: () => {},
       commit: async () => ({ ok: false, error: { code: "NO_WORKING_DRAFT" } }),
+      resolveRevisionConflict: async () => ({
+        ok: false,
+        error: { code: "WORKSPACE_NOT_READY" },
+      }),
     };
 
     vi.mocked(createHandoffWorkspaceController).mockReturnValue(controller);
@@ -560,6 +670,10 @@ describe("Handoff Workspace UI", () => {
       updateMarkdown: () => ({ ok: true }),
       discard: () => {},
       commit: async () => ({ ok: false, error: { code: "NO_WORKING_DRAFT" } }),
+      resolveRevisionConflict: async () => ({
+        ok: false,
+        error: { code: "WORKSPACE_NOT_READY" },
+      }),
     };
 
     vi.mocked(createHandoffWorkspaceController).mockReturnValue(controller);
@@ -621,6 +735,10 @@ describe("Handoff Workspace UI", () => {
       updateMarkdown: () => ({ ok: true }),
       discard: () => {},
       commit: async () => ({ ok: false, error: { code: "NO_WORKING_DRAFT" } }),
+      resolveRevisionConflict: async () => ({
+        ok: false,
+        error: { code: "WORKSPACE_NOT_READY" },
+      }),
     };
 
     vi.mocked(createHandoffWorkspaceController).mockReturnValue(controller);
@@ -698,6 +816,10 @@ describe("Handoff Workspace UI", () => {
       updateMarkdown: () => ({ ok: true }),
       discard: () => {},
       commit: async () => ({ ok: false, error: { code: "NO_WORKING_DRAFT" } }),
+      resolveRevisionConflict: async () => ({
+        ok: false,
+        error: { code: "WORKSPACE_NOT_READY" },
+      }),
     };
 
     vi.mocked(createHandoffWorkspaceController).mockReturnValue(controller);
@@ -798,6 +920,10 @@ describe("Handoff Workspace UI", () => {
       updateMarkdown,
       discard: () => {},
       commit: async () => ({ ok: false, error: { code: "NO_WORKING_DRAFT" } }),
+      resolveRevisionConflict: async () => ({
+        ok: false,
+        error: { code: "WORKSPACE_NOT_READY" },
+      }),
     };
 
     vi.mocked(createHandoffWorkspaceController).mockReturnValue(controller);

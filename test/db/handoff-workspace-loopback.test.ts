@@ -215,6 +215,102 @@ describe.skipIf(skip)("Human Workspace Browser API loopback", () => {
     }
   }, 25_000);
 
+  it("resolves a real Browser-writer conflict by appending the preserved Draft", async () => {
+    const port = await reservePort();
+    const spaceKey = formatSpaceKey(randomBytes(32));
+    const spaceId = await deriveSpaceId(parseSpaceKey(spaceKey));
+    const store = createHandoffStore(pool, RETENTION_WINDOW_MS);
+    const created = await store.createHandoff({
+      spaceId,
+      markdown: "# Initial",
+      redactionCount: 0,
+      origin: "mcp",
+    });
+    if (!created.ok) throw new Error("Expected the fixture Handoff to be created");
+
+    const config: ProductionConfig = {
+      port,
+      databaseUrl: DATABASE_URL!,
+      retentionWindowMs: RETENTION_WINDOW_MS,
+      logLevel: "silent",
+    };
+    let running: RunningServer | undefined;
+    const storage = new MemoryStorage();
+
+    try {
+      running = await startProduction(config);
+      const endpoint = `http://${running.host}:${running.port}`;
+      const request = (path: string, init?: RequestInit): Promise<Response> =>
+        fetch(`${endpoint}${path}`, init);
+      const controller = createHandoffWorkspaceController({
+        code: created.code,
+        sessionStorage: storage,
+        workingDraftStorage: createSessionWorkingDraftStorage(storage),
+        createClient: (key) => createBrowserApiClient(key, request),
+      });
+      const secondWriter = createBrowserApiClient(spaceKey, request);
+
+      await controller.submitSpaceKey(spaceKey);
+      controller.updateMarkdown("# Preserved local Draft", "human");
+
+      await expect(
+        secondWriter.appendRevision({
+          code: created.code,
+          baseRevision: 1,
+          markdown: "# Server Revision",
+          origin: "webmcp",
+        }),
+      ).resolves.toMatchObject({
+        ok: true,
+        revision: 2,
+        origin: "webmcp",
+        markdown: "# Server Revision",
+      });
+
+      await expect(controller.commit()).resolves.toEqual({
+        ok: false,
+        error: { code: "REVISION_CONFLICT", expectedRevision: 2, receivedBaseRevision: 1 },
+      });
+      expect(controller.getState()).toMatchObject({
+        kind: "ready",
+        committed: { revision: 1, markdown: "# Initial" },
+        workingDraft: {
+          markdown: "# Preserved local Draft",
+          baseRevision: 1,
+          lastModifiedVia: "human",
+        },
+      });
+
+      await expect(controller.resolveRevisionConflict("keep-working-draft")).resolves.toMatchObject(
+        {
+          ok: true,
+          value: { revision: 3, origin: "human", markdown: "# Preserved local Draft" },
+        },
+      );
+      expect(controller.getState()).toMatchObject({
+        kind: "ready",
+        committed: { revision: 3, latestRevision: 3, origin: "human" },
+        workingDraft: null,
+      });
+
+      await expect(secondWriter.readRevision(created.code, 2)).resolves.toMatchObject({
+        ok: true,
+        revision: 2,
+        markdown: "# Server Revision",
+        origin: "webmcp",
+      });
+      await expect(secondWriter.readRevision(created.code, 3)).resolves.toMatchObject({
+        ok: true,
+        revision: 3,
+        markdown: "# Preserved local Draft",
+        origin: "human",
+      });
+    } finally {
+      await running?.shutdown().catch(() => undefined);
+      await pool.query("DELETE FROM handoffs WHERE space_id = $1", [spaceId]);
+    }
+  }, 25_000);
+
   it("round-trips a Remote MCP Handoff through the shared WebMCP Draft and Commit", async () => {
     const port = await reservePort();
     const spaceKey = formatSpaceKey(randomBytes(32));

@@ -33,6 +33,7 @@ export type WorkspaceLocalError =
   | { code: "DRAFT_STORAGE_ERROR" }
   | { code: "WORKSPACE_NOT_READY" }
   | { code: "COMMIT_IN_PROGRESS" }
+  | { code: "NO_REVISION_CONFLICT" }
   | { code: "RICH_DRAFT_UNSUPPORTED"; blocker: RichWorkingDraftBlocker };
 
 export type WorkspaceError = BrowserApiError | BrowserClientError | WorkspaceLocalError;
@@ -53,6 +54,8 @@ export type WorkspaceState =
 export type WorkspaceCommandResult =
   | { ok: true; value: BrowserRevision }
   | { ok: false; error: WorkspaceError };
+
+export type RevisionConflictChoice = "use-server-latest" | "keep-working-draft";
 
 export type WorkspaceHistoryResult =
   | { ok: true; value: BrowserRevisionHistory }
@@ -77,6 +80,10 @@ export interface HandoffWorkspaceController {
   updateMarkdown(markdown: string, surface?: EditSurface): WorkspaceUpdateResult;
   discard(): void;
   commit(signal?: AbortSignal): Promise<WorkspaceCommandResult>;
+  resolveRevisionConflict(
+    choice: RevisionConflictChoice,
+    signal?: AbortSignal,
+  ): Promise<WorkspaceCommandResult>;
 }
 
 export interface HandoffWorkspaceControllerOptions {
@@ -278,7 +285,9 @@ export function createHandoffWorkspaceController(
             ? "human-edit"
             : "webmcp-replace"
           : null;
-      setState({ ...state, workingDraft: draft, actionError }, reason);
+      const nextActionError =
+        actionError ?? (state.actionError?.code === "REVISION_CONFLICT" ? state.actionError : null);
+      setState({ ...state, workingDraft: draft, actionError: nextActionError }, reason);
       return actionError ? { ok: false, error: actionError } : { ok: true };
     },
 
@@ -337,6 +346,101 @@ export function createHandoffWorkspaceController(
       try {
         options.workingDraftStorage.remove(space.localSpaceId, committed.code);
       } catch {
+        setState(
+          {
+            ...state,
+            committed: result,
+            commitPending: false,
+            actionError: { code: "DRAFT_STORAGE_ERROR" },
+          },
+          "workspace-reset",
+        );
+        return { ok: true, value: result };
+      }
+
+      setState(
+        {
+          kind: "ready",
+          code: result.code,
+          committed: result,
+          workingDraft: null,
+          commitPending: false,
+          actionError: null,
+        },
+        "workspace-reset",
+      );
+      return { ok: true, value: result };
+    },
+
+    async resolveRevisionConflict(
+      choice: RevisionConflictChoice,
+      signal?: AbortSignal,
+    ): Promise<WorkspaceCommandResult> {
+      if (state.kind !== "ready" || !activeSpace) {
+        return { ok: false, error: { code: "WORKSPACE_NOT_READY" } };
+      }
+      if (!state.workingDraft) {
+        return { ok: false, error: { code: "NO_WORKING_DRAFT" } };
+      }
+      if (state.commitPending) {
+        return { ok: false, error: { code: "COMMIT_IN_PROGRESS" } };
+      }
+      const conflict = state.actionError?.code === "REVISION_CONFLICT" ? state.actionError : null;
+      if (!conflict) {
+        return { ok: false, error: { code: "NO_REVISION_CONFLICT" } };
+      }
+      if (choice === "keep-working-draft" && state.workingDraft.markdown.length === 0) {
+        return { ok: false, error: { code: "EMPTY_MARKDOWN" } };
+      }
+      if (signal?.aborted) {
+        return { ok: false, error: { code: "REQUEST_CANCELLED" } };
+      }
+
+      const draft = state.workingDraft;
+      const committed = state.committed;
+      const space = activeSpace;
+      setState({ ...state, commitPending: true }, null);
+
+      let result: BrowserClientResult;
+      try {
+        result =
+          choice === "use-server-latest"
+            ? await space.client.getCurrent(committed.code, signal)
+            : await space.client.appendRevision(
+                {
+                  code: committed.code,
+                  baseRevision: conflict.expectedRevision,
+                  markdown: draft.markdown,
+                  origin: draft.lastModifiedVia,
+                },
+                signal,
+              );
+      } catch {
+        result = { ok: false, error: { code: "NETWORK_ERROR" } };
+      }
+
+      if (state.kind !== "ready" || state.workingDraft !== draft || !state.commitPending) {
+        return result.ok ? { ok: true, value: result } : result;
+      }
+      if (!result.ok) {
+        setState(
+          {
+            ...state,
+            commitPending: false,
+            actionError: result.error.code === "REVISION_CONFLICT" ? result.error : conflict,
+          },
+          null,
+        );
+        return result;
+      }
+
+      try {
+        options.workingDraftStorage.remove(space.localSpaceId, committed.code);
+      } catch {
+        if (choice === "use-server-latest") {
+          setState({ ...state, commitPending: false, actionError: conflict }, null);
+          return { ok: false, error: { code: "DRAFT_STORAGE_ERROR" } };
+        }
         setState(
           {
             ...state,

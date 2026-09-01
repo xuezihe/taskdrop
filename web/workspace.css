@@ -315,7 +315,7 @@
   display: grid;
   min-width: 0;
   min-height: 0;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   background: var(--workspace-surface);
 }
 
@@ -536,18 +536,60 @@
   text-align: right;
 }
 
+.workspace-conflict-panel {
+  display: grid;
+  grid-row: 3;
+  gap: 12px;
+  margin: 20px 32px 0;
+  border: 1px solid #f0b7b1;
+  border-radius: 8px;
+  padding: 16px 18px;
+  background: #fff8f7;
+}
+
+.workspace-conflict-panel h2 {
+  margin: 0;
+  color: var(--workspace-danger);
+  font-size: 0.95rem;
+  line-height: 1.35;
+}
+
+.workspace-conflict-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+}
+
+.workspace-conflict-summary p,
+.workspace-conflict-message {
+  margin: 0;
+  color: var(--workspace-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.workspace-conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.workspace-conflict-message {
+  color: var(--workspace-danger);
+}
+
 .workspace-editor-viewport {
   position: relative;
   min-width: 0;
   min-height: 0;
-  grid-row: 3;
+  grid-row: 4;
   overflow: auto;
   background: var(--workspace-surface);
   scrollbar-gutter: stable;
 }
 
 .workspace-history-document {
-  grid-row: 3;
+  grid-row: 4;
   min-width: 0;
   min-height: 0;
   overflow: auto;
@@ -925,6 +967,11 @@
 
   .workspace-action-message {
     padding-inline: 16px;
+  }
+
+  .workspace-conflict-panel {
+    margin-inline: 16px;
+    padding: 14px;
   }
 
   .workspace-editor-root .milkdown .editor {

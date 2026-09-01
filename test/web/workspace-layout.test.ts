@@ -63,14 +63,14 @@ describe("Handoff Workspace layout", () => {
     expect(getComputedStyle(milkdown).maxWidth).toBe("960px");
   });
 
-  it("keeps the editor in the flexible document row when the action message is hidden", () => {
+  it("keeps the editor below the optional conflict panel", () => {
     installStyles(workspaceStyles);
 
     const viewport = document.createElement("div");
     viewport.className = "workspace-editor-viewport";
     document.body.append(viewport);
 
-    expect(getComputedStyle(viewport).gridRow).toBe("3");
+    expect(getComputedStyle(viewport).gridRow).toBe("4");
   });
 
   afterAll(() => {
