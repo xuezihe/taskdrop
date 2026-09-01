@@ -1,6 +1,7 @@
 import "./workspace.css";
 
 import { createBrowserApiClient } from "./browser-api-client.js";
+import type { BrowserRevision, BrowserRevisionHistory } from "./browser-api-client.js";
 import {
   createHandoffWorkspaceController,
   type HandoffWorkspaceController,
@@ -23,6 +24,18 @@ type WorkspaceView = {
   render(state: WorkspaceState, reason: MarkdownChangeReason): void;
   destroy(): void;
 };
+
+type RevisionHistoryViewState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "ready"; history: BrowserRevisionHistory }
+  | { kind: "error"; error: WorkspaceError };
+
+type DocumentSelection =
+  | { kind: "working-draft" }
+  | { kind: "historical-loading"; revision: number }
+  | { kind: "historical"; snapshot: BrowserRevision }
+  | { kind: "historical-error"; revision: number; error: WorkspaceError };
 
 export async function mountHandoffWorkspace(root: HTMLElement, routeCode: string): Promise<void> {
   let sessionStorage: Storage;
@@ -114,6 +127,10 @@ function createView(
   historyList.setAttribute("aria-label", "Handoff history");
   const workingDraftRow = document.createElement("li");
   workingDraftRow.className = "workspace-history-row workspace-history-row-active";
+  const workingDraftButton = document.createElement("button");
+  workingDraftButton.type = "button";
+  workingDraftButton.className = "workspace-history-button";
+  workingDraftButton.setAttribute("aria-current", "page");
   const workingDraftMarker = document.createElement("span");
   workingDraftMarker.className = "workspace-history-marker";
   const workingDraftBody = document.createElement("div");
@@ -127,12 +144,24 @@ function createView(
   workingDraftDetails.className = "workspace-history-detail";
   workingDraftDetails.hidden = true;
   workingDraftBody.append(workingDraftName, workingDraftMeta, workingDraftDetails);
-  workingDraftRow.append(workingDraftMarker, workingDraftBody);
+  workingDraftButton.append(workingDraftMarker, workingDraftBody);
+  workingDraftRow.append(workingDraftButton);
   historyList.append(workingDraftRow);
   const historyEmpty = document.createElement("p");
   historyEmpty.className = "workspace-history-empty";
   historyEmpty.textContent = "Committed Revisions will appear here after Commit.";
-  historySection.append(historyTitle, historyList, historyEmpty);
+  historyEmpty.hidden = true;
+  const historyStatus = document.createElement("div");
+  historyStatus.className = "workspace-history-status";
+  historyStatus.setAttribute("role", "status");
+  historyStatus.setAttribute("aria-live", "polite");
+  const historyStatusText = document.createElement("p");
+  const historyRetry = document.createElement("button");
+  historyRetry.type = "button";
+  historyRetry.className = "workspace-secondary workspace-history-retry";
+  historyRetry.textContent = "Retry";
+  historyStatus.append(historyStatusText, historyRetry);
+  historySection.append(historyTitle, historyList, historyEmpty, historyStatus);
 
   const spaceSection = document.createElement("section");
   spaceSection.className = "workspace-sidebar-section";
@@ -263,7 +292,36 @@ function createView(
   editorFallback.append(editorFallbackText, editorFallbackContent);
   editorViewport.append(editorState, editorFallback, editorRoot);
 
-  documentPanel.append(contextBar, actionMessage, editorViewport);
+  const historicalViewport = document.createElement("section");
+  historicalViewport.className = "workspace-history-document";
+  historicalViewport.setAttribute("aria-label", "Historical Revision");
+  historicalViewport.hidden = true;
+  const historicalHeader = document.createElement("header");
+  historicalHeader.className = "workspace-history-document-header";
+  const historicalTitle = document.createElement("h2");
+  historicalTitle.className = "workspace-history-document-title";
+  const historicalMeta = document.createElement("p");
+  historicalMeta.className = "workspace-history-document-meta";
+  const historicalReturn = document.createElement("button");
+  historicalReturn.type = "button";
+  historicalReturn.className = "workspace-secondary workspace-history-return";
+  historicalReturn.textContent = "Return to Working Draft";
+  historicalHeader.append(historicalTitle, historicalMeta, historicalReturn);
+  const historicalState = document.createElement("div");
+  historicalState.className = "workspace-history-document-state";
+  historicalState.setAttribute("role", "status");
+  historicalState.setAttribute("aria-live", "polite");
+  const historicalStateText = document.createElement("p");
+  const historicalRetry = document.createElement("button");
+  historicalRetry.type = "button";
+  historicalRetry.className = "workspace-secondary workspace-history-document-retry";
+  historicalRetry.textContent = "Retry";
+  historicalState.append(historicalStateText, historicalRetry);
+  const historicalContent = document.createElement("article");
+  historicalContent.className = "workspace-history-document-content";
+  historicalViewport.append(historicalHeader, historicalState, historicalContent);
+
+  documentPanel.append(contextBar, actionMessage, editorViewport, historicalViewport);
   layout.append(sidebar, documentPanel);
   shell.append(keyGate, loadMessage, layout);
   root.replaceChildren(shell);
@@ -277,9 +335,188 @@ function createView(
   let overflowOpen = false;
   let destroyed = false;
   let editorUnsupported: RichWorkingDraftBlocker | null = null;
+  let historyState: RevisionHistoryViewState = { kind: "idle" };
+  let historySource: BrowserRevision | null = null;
+  let documentSelection: DocumentSelection = { kind: "working-draft" };
+  let historyRequestToken = 0;
+  let revisionReadToken = 0;
 
   const effectiveMarkdown = (state: ReadyWorkspaceState): string =>
     state.workingDraft?.markdown ?? state.committed.markdown;
+
+  const isHistoricalSelection = (): boolean => documentSelection.kind !== "working-draft";
+
+  const invalidateHistoryRequests = (): void => {
+    historyRequestToken += 1;
+    revisionReadToken += 1;
+  };
+
+  const resetHistoryView = (): void => {
+    invalidateHistoryRequests();
+    historySource = null;
+    historyState = { kind: "idle" };
+    documentSelection = { kind: "working-draft" };
+  };
+
+  function renderHistory(state: WorkspaceState): void {
+    historyList.replaceChildren(workingDraftRow);
+    if (state.kind !== "ready") {
+      workingDraftRow.className = "workspace-history-row workspace-history-row-active";
+      workingDraftButton.setAttribute("aria-current", "page");
+      historyStatus.hidden = true;
+      historyEmpty.hidden = true;
+      return;
+    }
+
+    const workingDraftActive = documentSelection.kind === "working-draft";
+    workingDraftRow.className = `workspace-history-row ${
+      workingDraftActive ? "workspace-history-row-active" : ""
+    }`;
+    if (workingDraftActive) workingDraftButton.setAttribute("aria-current", "page");
+    else workingDraftButton.removeAttribute("aria-current");
+
+    if (historyState.kind === "ready") {
+      historyEmpty.hidden = historyState.history.revisions.length > 0;
+      for (const revision of historyState.history.revisions) {
+        historyList.append(createRevisionHistoryRow(revision));
+      }
+      historyStatus.hidden = true;
+      historyRetry.hidden = true;
+      return;
+    }
+
+    historyEmpty.hidden = true;
+    historyStatus.hidden = false;
+    historyRetry.hidden = historyState.kind !== "error";
+    historyStatusText.textContent =
+      historyState.kind === "loading"
+        ? "Loading Revision history…"
+        : historyState.kind === "error"
+          ? describeError(historyState.error)
+          : "";
+  }
+
+  function createRevisionHistoryRow(
+    revision: BrowserRevisionHistory["revisions"][number],
+  ): HTMLLIElement {
+    const row = document.createElement("li");
+    const selectedRevision =
+      documentSelection.kind === "historical" ||
+      documentSelection.kind === "historical-loading" ||
+      documentSelection.kind === "historical-error"
+        ? documentSelection.kind === "historical"
+          ? documentSelection.snapshot.revision
+          : documentSelection.revision
+        : null;
+    const selected = selectedRevision === revision.revision;
+    row.className = `workspace-history-row ${selected ? "workspace-history-row-active" : ""}`;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "workspace-history-button";
+    button.setAttribute("aria-label", `Read Revision ${revision.revision}`);
+    if (selected) button.setAttribute("aria-current", "page");
+    button.addEventListener("click", () => void selectRevision(revision.revision));
+
+    const marker = document.createElement("span");
+    marker.className = "workspace-history-marker";
+    const body = document.createElement("span");
+    body.className = "workspace-history-body";
+    const name = document.createElement("span");
+    name.className = "workspace-history-name";
+    name.textContent = `Revision ${revision.revision}`;
+    const meta = document.createElement("span");
+    meta.className = "workspace-history-meta";
+    const origin = document.createElement("span");
+    origin.textContent = formatRevisionOrigin(revision.origin);
+    const separator = document.createTextNode(" · ");
+    const time = document.createElement("time");
+    time.dateTime = revision.createdAt;
+    time.textContent = formatRevisionTimestamp(revision.createdAt);
+    meta.append(origin, separator, time);
+    body.append(name, meta);
+    button.append(marker, body);
+    row.append(button);
+    return row;
+  }
+
+  function requestHistory(committed: BrowserRevision): void {
+    const token = ++historyRequestToken;
+    historyState = { kind: "loading" };
+    documentSelection = { kind: "working-draft" };
+    const state = controller.getState();
+    if (state.kind === "ready") renderHistory(state);
+
+    void controller
+      .getRevisionHistory()
+      .then((result) => {
+        const current = controller.getState();
+        if (
+          destroyed ||
+          token !== historyRequestToken ||
+          current.kind !== "ready" ||
+          current.committed !== committed
+        ) {
+          return;
+        }
+        historyState = result.ok
+          ? { kind: "ready", history: result.value }
+          : { kind: "error", error: result.error };
+        renderHistory(current);
+      })
+      .catch(() => {
+        const current = controller.getState();
+        if (
+          destroyed ||
+          token !== historyRequestToken ||
+          current.kind !== "ready" ||
+          current.committed !== committed
+        ) {
+          return;
+        }
+        historyState = { kind: "error", error: { code: "NETWORK_ERROR" } };
+        renderHistory(current);
+      });
+  }
+
+  function ensureHistory(state: ReadyWorkspaceState): void {
+    if (historySource === state.committed) return;
+    historySource = state.committed;
+    requestHistory(state.committed);
+  }
+
+  async function selectRevision(revision: number): Promise<void> {
+    const state = controller.getState();
+    if (state.kind !== "ready") return;
+    const token = ++revisionReadToken;
+    documentSelection = { kind: "historical-loading", revision };
+    renderState(state);
+    renderHistory(state);
+    renderDocument(state);
+
+    let result;
+    try {
+      result = await controller.readRevision(revision);
+    } catch {
+      result = { ok: false as const, error: { code: "NETWORK_ERROR" as const } };
+    }
+
+    const current = controller.getState();
+    if (
+      destroyed ||
+      token !== revisionReadToken ||
+      current.kind !== "ready" ||
+      current.committed !== state.committed
+    ) {
+      return;
+    }
+    documentSelection = result.ok
+      ? { kind: "historical", snapshot: result.value }
+      : { kind: "historical-error", revision, error: result.error };
+    renderState(current);
+    renderHistory(current);
+    renderDocument(current);
+  }
 
   const renderEditorState = (): void => {
     if (editorUnsupported) {
@@ -459,9 +696,12 @@ function createView(
     workingDraftDetails.hidden = state.workingDraft === null;
     workingDraftDetails.textContent = draftMetadataText(state);
     handoffCode.textContent = state.code;
-    commit.disabled = state.workingDraft === null || state.commitPending;
-    discardMenuItem.disabled = state.workingDraft === null || state.commitPending;
-    discardConfirmAction.disabled = state.workingDraft === null || state.commitPending;
+    const historySelected = isHistoricalSelection();
+    commit.disabled = historySelected || state.workingDraft === null || state.commitPending;
+    discardMenuItem.disabled =
+      historySelected || state.workingDraft === null || state.commitPending;
+    discardConfirmAction.disabled =
+      historySelected || state.workingDraft === null || state.commitPending;
     const message = state.commitPending
       ? "Committing Revision…"
       : state.actionError
@@ -471,12 +711,60 @@ function createView(
     actionMessage.textContent = message;
   };
 
+  function renderDocument(state: WorkspaceState): void {
+    const selection = documentSelection;
+    const historical = selection.kind !== "working-draft";
+    editorViewport.hidden = historical;
+    historicalViewport.hidden = !historical;
+    if (!historical) {
+      historicalState.hidden = true;
+      historicalContent.replaceChildren();
+      historicalTitle.textContent = "";
+      historicalMeta.textContent = "";
+      return;
+    }
+
+    historicalReturn.hidden = false;
+    historicalTitle.textContent = `Revision ${
+      selection.kind === "historical" ? selection.snapshot.revision : selection.revision
+    }`;
+    historicalState.hidden = selection.kind === "historical";
+    historicalRetry.hidden = selection.kind !== "historical-error";
+
+    if (selection.kind === "historical-loading") {
+      historicalMeta.textContent = "";
+      historicalStateText.textContent = "Loading Revision…";
+      historicalContent.replaceChildren();
+      return;
+    }
+    if (selection.kind === "historical-error") {
+      historicalMeta.textContent = "";
+      historicalStateText.textContent = describeError(selection.error);
+      historicalContent.replaceChildren();
+      return;
+    }
+
+    const origin = formatRevisionOrigin(selection.snapshot.origin);
+    historicalMeta.replaceChildren(
+      document.createTextNode(`${origin} · `),
+      createRevisionTime(selection.snapshot.createdAt),
+    );
+    historicalContent.innerHTML = renderMarkdownToHtml(selection.snapshot.markdown);
+  }
+
   const render = (state: WorkspaceState, reason: MarkdownChangeReason): void => {
+    if (state.kind !== "ready") {
+      resetHistoryView();
+    } else {
+      ensureHistory(state);
+    }
     renderState(state);
+    renderHistory(state);
 
     if (state.kind !== "ready") {
       clearUnsupportedMarkdown();
       destroyEditor();
+      renderDocument(state);
       return;
     }
 
@@ -494,6 +782,7 @@ function createView(
     }
     if (!editor) {
       renderEditorState();
+      renderDocument(state);
       return;
     }
 
@@ -504,14 +793,43 @@ function createView(
     }
     editor.setReadOnly(state.commitPending);
     renderEditorState();
+    renderDocument(state);
   };
+
+  function showWorkingDraft(): void {
+    const state = controller.getState();
+    if (state.kind !== "ready") return;
+    revisionReadToken += 1;
+    documentSelection = { kind: "working-draft" };
+    renderState(state);
+    renderHistory(state);
+    renderDocument(state);
+  }
+
+  function retryHistory(): void {
+    const state = controller.getState();
+    if (state.kind !== "ready") return;
+    requestHistory(state.committed);
+  }
 
   keyForm.addEventListener("submit", (event) => {
     event.preventDefault();
     void controller.submitSpaceKey(keyInput.value);
   });
+  workingDraftButton.addEventListener("click", showWorkingDraft);
+  historyRetry.addEventListener("click", retryHistory);
+  historicalReturn.addEventListener("click", showWorkingDraft);
+  historicalRetry.addEventListener("click", () => {
+    if (
+      documentSelection.kind === "historical-error" ||
+      documentSelection.kind === "historical-loading"
+    ) {
+      void selectRevision(documentSelection.revision);
+    }
+  });
   changeKey.addEventListener("click", () => {
     destroyEditor();
+    resetHistoryView();
     keyGate.hidden = false;
     layout.hidden = true;
     loadMessage.hidden = true;
@@ -553,6 +871,7 @@ function createView(
     destroy(): void {
       if (destroyed) return;
       destroyed = true;
+      invalidateHistoryRequests();
       document.removeEventListener("click", documentClickHandler);
       destroyEditor();
     },
@@ -623,6 +942,33 @@ function describeError(error: WorkspaceError): string {
 function formatExpiry(expiresAt: string): string {
   const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(expiresAt);
   return match ? `${match[1]} ${match[2]} UTC` : expiresAt;
+}
+
+function formatRevisionOrigin(origin: BrowserRevision["origin"]): string {
+  switch (origin) {
+    case "mcp":
+      return "MCP";
+    case "human":
+      return "Human";
+    case "webmcp":
+      return "WebMCP";
+  }
+}
+
+function formatRevisionTimestamp(createdAt: string): string {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return createdAt;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function createRevisionTime(createdAt: string): HTMLTimeElement {
+  const time = document.createElement("time");
+  time.dateTime = createdAt;
+  time.textContent = formatRevisionTimestamp(createdAt);
+  return time;
 }
 
 function draftMetadataText(state: ReadyWorkspaceState): string {

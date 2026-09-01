@@ -342,6 +342,12 @@ describe("Handoff Workspace controller", () => {
     );
 
     await controller.submitSpaceKey(SPACE_KEY);
+    expect(controller.updateMarkdown("# Existing Draft", "human")).toEqual({ ok: true });
+    const draftBeforeReads = readyState(controller).workingDraft;
+    const storageBeforeReads = Array.from({ length: storage.length }, (_, index) => [
+      storage.key(index),
+      storage.key(index) === null ? null : storage.getItem(storage.key(index)!),
+    ]);
     await expect(controller.getRevisionHistory()).resolves.toEqual({
       ok: true,
       value: history(),
@@ -350,20 +356,26 @@ describe("Handoff Workspace controller", () => {
       ok: true,
       value: revision(),
     });
-    expect(readyState(controller).workingDraft).toBeNull();
+    expect(readyState(controller).workingDraft).toBe(draftBeforeReads);
+    expect(
+      Array.from({ length: storage.length }, (_, index) => [
+        storage.key(index),
+        storage.key(index) === null ? null : storage.getItem(storage.key(index)!),
+      ]),
+    ).toEqual(storageBeforeReads);
 
     expect(controller.updateMarkdown("# Agent update", "webmcp")).toEqual({ ok: true });
     expect(readyState(controller).workingDraft).toMatchObject({
       markdown: "# Agent update",
       lastModifiedVia: "webmcp",
-      contributors: ["webmcp"],
+      contributors: ["human", "webmcp"],
     });
 
     expect(controller.updateMarkdown("# Human follow-up")).toEqual({ ok: true });
     expect(readyState(controller).workingDraft).toMatchObject({
       markdown: "# Human follow-up",
       lastModifiedVia: "human",
-      contributors: ["webmcp", "human"],
+      contributors: ["human", "webmcp"],
     });
   });
 
