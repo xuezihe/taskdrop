@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import { installBrowserGlobals } from "./jsdom-browser-globals.js";
+import { largeRichMarkdown } from "../fixtures/large-rich-markdown.js";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -168,6 +169,32 @@ describe("Working Draft editor module", () => {
     });
     editorElement.dispatchEvent(fileDrop);
     expect(fileDrop.defaultPrevented).toBe(true);
+    expect(onHumanMarkdown).not.toHaveBeenCalled();
+
+    await editor.destroy();
+    root.remove();
+  });
+
+  it("mounts the representative large fixture without firing the human callback", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const onHumanMarkdown = vi.fn();
+
+    const editor = await mountWorkingDraftEditor({
+      root,
+      markdown: largeRichMarkdown,
+      onHumanMarkdown,
+    });
+
+    const editorElement = root.querySelector<HTMLElement>(".editor");
+    expect(editorElement).not.toBeNull();
+    expect(editorElement?.getAttribute("contenteditable")).toBe("true");
+
+    await wait(300);
+    expect(onHumanMarkdown).not.toHaveBeenCalled();
+
+    editor.replaceMarkdown({ markdown: largeRichMarkdown, history: "record" });
+    await wait(300);
     expect(onHumanMarkdown).not.toHaveBeenCalled();
 
     await editor.destroy();

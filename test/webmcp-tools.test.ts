@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { formatSpaceKey } from "../src/production/space-identity.js";
+import { largeRichMarkdown } from "./fixtures/large-rich-markdown.js";
 import type {
   BrowserApiClient,
   BrowserClientResult,
@@ -232,6 +233,28 @@ describe("Handoff WebMCP tools", () => {
       error: { code: "RICH_DRAFT_UNSUPPORTED", blocker: "image" },
     });
     expect(controller.getState()).toMatchObject({ kind: "ready", workingDraft: null });
+  });
+
+  it("replaces the shared Working Draft with the representative large fixture and records WebMCP provenance", async () => {
+    const controller = await readyController();
+    const tools = createHandoffWebMcpTools(controller);
+
+    await expect(
+      execute(tool(tools, "update_working_draft"), { markdown: largeRichMarkdown }),
+    ).resolves.toMatchObject({
+      code: "ABC001",
+      latestRevision: 1,
+      workingDraft: {
+        baseRevision: 1,
+        markdown: largeRichMarkdown,
+        lastModifiedVia: "webmcp",
+        contributors: ["webmcp"],
+      },
+    });
+    expect(controller.getState()).toMatchObject({
+      kind: "ready",
+      workingDraft: { markdown: largeRichMarkdown, lastModifiedVia: "webmcp" },
+    });
   });
 
   it("commits from Draft provenance and returns structured no-Draft, empty, and conflict results", async () => {

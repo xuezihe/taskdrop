@@ -1,5 +1,14 @@
+import { Buffer } from "node:buffer";
+
 import { describe, expect, it } from "vitest";
 
+import {
+  LARGE_RICH_MARKDOWN_END_SENTINEL,
+  LARGE_RICH_MARKDOWN_MAX_BYTES,
+  LARGE_RICH_MARKDOWN_MIN_BYTES,
+  LARGE_RICH_MARKDOWN_START_SENTINEL,
+  largeRichMarkdown,
+} from "../fixtures/large-rich-markdown.js";
 import {
   checkRichWorkingDraftMarkdown,
   type RichWorkingDraftBlocker,
@@ -73,5 +82,28 @@ describe("rich Working Draft Markdown gate", () => {
 
   it("does not classify a horizontal rule as a table", () => {
     expect(checkRichWorkingDraftMarkdown("---")).toEqual({ allowed: true });
+  });
+
+  it("accepts the representative large rich Markdown fixture inside the 64–128 KiB band", () => {
+    const bytes = Buffer.byteLength(largeRichMarkdown, "utf8");
+    expect(bytes).toBeGreaterThanOrEqual(LARGE_RICH_MARKDOWN_MIN_BYTES);
+    expect(bytes).toBeLessThanOrEqual(LARGE_RICH_MARKDOWN_MAX_BYTES);
+    expect(checkRichWorkingDraftMarkdown(largeRichMarkdown)).toEqual({ allowed: true });
+  });
+
+  it("contains the expected representative Markdown structures", () => {
+    expect(largeRichMarkdown).toContain(`# ${LARGE_RICH_MARKDOWN_START_SENTINEL}`);
+    expect(largeRichMarkdown).toContain(`## ${LARGE_RICH_MARKDOWN_END_SENTINEL}`);
+    expect(largeRichMarkdown).toContain("## Section 1 overview");
+    expect(largeRichMarkdown).toContain("## Section 136 overview");
+    expect(largeRichMarkdown).toContain(
+      "Section 1 carries representative prose for the large Working Draft",
+    );
+    expect(largeRichMarkdown).toContain("- Root item 1 with plain content");
+    expect(largeRichMarkdown).toContain("  - Nested item 1a under the root");
+    expect(largeRichMarkdown).toContain("- [ ] Open task 1 for the next Agent pass");
+    expect(largeRichMarkdown).toContain("[TaskDrop documentation](https://example.com/taskdrop-1)");
+    expect(largeRichMarkdown).toContain("> Quoted context 1:");
+    expect(largeRichMarkdown).toContain("```ts");
   });
 });

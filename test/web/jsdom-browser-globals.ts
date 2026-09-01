@@ -50,6 +50,17 @@ export function installBrowserGlobals(): () => void {
             unobserve() {}
             disconnect() {}
           },
+    IntersectionObserver:
+      "IntersectionObserver" in win
+        ? win.IntersectionObserver
+        : class {
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+            takeRecords(): IntersectionObserverEntry[] {
+              return [];
+            }
+          },
     requestAnimationFrame: (cb: FrameRequestCallback) => setTimeout(cb, 0),
     cancelAnimationFrame: (id: number) => clearTimeout(id),
     getComputedStyle: win.getComputedStyle.bind(win),

@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { createServer } from "node:http";
 
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -17,6 +18,11 @@ import { createBrowserApiClient } from "../../web/browser-api-client.js";
 import { createSessionWorkingDraftStorage } from "../../web/handoff-session-storage.js";
 import { createHandoffWorkspaceController } from "../../web/handoff-workspace-controller.js";
 import { createHandoffWebMcpTools, type HandoffWebMcpTool } from "../../web/webmcp-tools.js";
+import {
+  LARGE_RICH_MARKDOWN_END_SENTINEL,
+  LARGE_RICH_MARKDOWN_START_SENTINEL,
+  largeRichMarkdown,
+} from "../fixtures/large-rich-markdown.js";
 
 const DATABASE_URL = process.env["DATABASE_URL"];
 const skip = !DATABASE_URL;
@@ -82,6 +88,12 @@ function webMcpTool(tools: readonly HandoffWebMcpTool[], name: string): HandoffW
 
 function executeWebMcpTool(tool: HandoffWebMcpTool, input: unknown): Promise<unknown> {
   return tool.execute(input, { signal: new AbortController().signal });
+}
+
+function boundaryMarkdown(totalBytes: number): string {
+  const heading = "# Boundary capacity fixture\n\n";
+  const filler = "A".repeat(totalBytes - Buffer.byteLength(heading, "utf8"));
+  return heading + filler;
 }
 
 describe.skipIf(skip)("Human Workspace Browser API loopback", () => {
@@ -298,4 +310,236 @@ describe.skipIf(skip)("Human Workspace Browser API loopback", () => {
       await pool.query("DELETE FROM handoffs WHERE space_id = $1", [spaceId]);
     }
   }, 25_000);
+
+  it("commits exactly 262144 UTF-8 bytes and reads the complete Revision back", async () => {
+    const port = await reservePort();
+    const spaceKey = formatSpaceKey(randomBytes(32));
+    const spaceId = await deriveSpaceId(parseSpaceKey(spaceKey));
+    const store = createHandoffStore(pool, RETENTION_WINDOW_MS);
+    const created = await store.createHandoff({
+      spaceId,
+      markdown: "# Initial",
+      redactionCount: 0,
+      origin: "mcp",
+    });
+    if (!created.ok) throw new Error("Expected the fixture Handoff to be created");
+
+    const config: ProductionConfig = {
+      port,
+      databaseUrl: DATABASE_URL!,
+      retentionWindowMs: RETENTION_WINDOW_MS,
+      logLevel: "silent",
+    };
+    let running: RunningServer | undefined;
+    const storage = new MemoryStorage();
+
+    try {
+      running = await startProduction(config);
+      const endpoint = `http://${running.host}:${running.port}`;
+      const request = (path: string, init?: RequestInit): Promise<Response> =>
+        fetch(`${endpoint}${path}`, init);
+      const controller = createHandoffWorkspaceController({
+        code: created.code,
+        sessionStorage: storage,
+        workingDraftStorage: createSessionWorkingDraftStorage(storage),
+        createClient: (key) => createBrowserApiClient(key, request),
+      });
+      await controller.submitSpaceKey(spaceKey);
+
+      const markdown = boundaryMarkdown(262_144);
+      expect(Buffer.byteLength(markdown, "utf8")).toBe(262_144);
+      controller.updateMarkdown(markdown, "human");
+
+      await expect(controller.commit()).resolves.toMatchObject({
+        ok: true,
+        value: { revision: 2, origin: "human" },
+      });
+      expect(controller.getState()).toMatchObject({ kind: "ready", workingDraft: null });
+
+      const readBack = await controller.readRevision(2);
+      expect(readBack).toMatchObject({ ok: true, value: { revision: 2, origin: "human" } });
+      if (!readBack.ok) throw new Error("Expected the committed Revision to be readable");
+      expect(readBack.value.markdown).toBe(markdown);
+      expect(Buffer.byteLength(readBack.value.markdown, "utf8")).toBe(262_144);
+    } finally {
+      await running?.shutdown().catch(() => undefined);
+      await pool.query("DELETE FROM handoffs WHERE space_id = $1", [spaceId]);
+    }
+  }, 60_000);
+
+  it("rejects a 262145-byte Commit atomically and preserves the local Draft", async () => {
+    const port = await reservePort();
+    const spaceKey = formatSpaceKey(randomBytes(32));
+    const spaceId = await deriveSpaceId(parseSpaceKey(spaceKey));
+    const store = createHandoffStore(pool, RETENTION_WINDOW_MS);
+    const created = await store.createHandoff({
+      spaceId,
+      markdown: "# Initial",
+      redactionCount: 0,
+      origin: "mcp",
+    });
+    if (!created.ok) throw new Error("Expected the fixture Handoff to be created");
+
+    const config: ProductionConfig = {
+      port,
+      databaseUrl: DATABASE_URL!,
+      retentionWindowMs: RETENTION_WINDOW_MS,
+      logLevel: "silent",
+    };
+    let running: RunningServer | undefined;
+    const storage = new MemoryStorage();
+
+    try {
+      running = await startProduction(config);
+      const endpoint = `http://${running.host}:${running.port}`;
+      const request = (path: string, init?: RequestInit): Promise<Response> =>
+        fetch(`${endpoint}${path}`, init);
+      const controller = createHandoffWorkspaceController({
+        code: created.code,
+        sessionStorage: storage,
+        workingDraftStorage: createSessionWorkingDraftStorage(storage),
+        createClient: (key) => createBrowserApiClient(key, request),
+      });
+      await controller.submitSpaceKey(spaceKey);
+
+      const before = await pool.query<{ latest_revision: number; expires_at: Date }>(
+        "SELECT latest_revision, expires_at FROM handoffs WHERE space_id = $1 AND code = $2",
+        [spaceId, created.code],
+      );
+      const revisionsBefore = await pool.query<{ count: string }>(
+        "SELECT count(*) AS count FROM revisions WHERE space_id = $1 AND handoff_code = $2",
+        [spaceId, created.code],
+      );
+
+      const markdown = boundaryMarkdown(262_145);
+      expect(Buffer.byteLength(markdown, "utf8")).toBe(262_145);
+      controller.updateMarkdown(markdown, "human");
+
+      await expect(controller.commit()).resolves.toEqual({
+        ok: false,
+        error: { code: "CONTENT_TOO_LARGE", limitBytes: 262_144 },
+      });
+
+      const after = await pool.query<{ latest_revision: number; expires_at: Date }>(
+        "SELECT latest_revision, expires_at FROM handoffs WHERE space_id = $1 AND code = $2",
+        [spaceId, created.code],
+      );
+      const revisionsAfter = await pool.query<{ count: string }>(
+        "SELECT count(*) AS count FROM revisions WHERE space_id = $1 AND handoff_code = $2",
+        [spaceId, created.code],
+      );
+      expect(after.rows[0]!.latest_revision).toBe(before.rows[0]!.latest_revision);
+      expect(after.rows[0]!.expires_at.getTime()).toBe(before.rows[0]!.expires_at.getTime());
+      expect(revisionsAfter.rows[0]!.count).toBe(revisionsBefore.rows[0]!.count);
+
+      expect(controller.getState()).toMatchObject({
+        kind: "ready",
+        workingDraft: { markdown, baseRevision: 1, lastModifiedVia: "human" },
+      });
+
+      const recovered = createHandoffWorkspaceController({
+        code: created.code,
+        sessionStorage: storage,
+        workingDraftStorage: createSessionWorkingDraftStorage(storage),
+        createClient: (key) => createBrowserApiClient(key, request),
+      });
+      await recovered.submitSpaceKey(spaceKey);
+      expect(recovered.getState()).toMatchObject({
+        kind: "ready",
+        workingDraft: { markdown },
+      });
+    } finally {
+      await running?.shutdown().catch(() => undefined);
+      await pool.query("DELETE FROM handoffs WHERE space_id = $1", [spaceId]);
+    }
+  }, 60_000);
+
+  it("round-trips the representative large Draft through Human edit, WebMCP read, Commit, and Revision read", async () => {
+    const port = await reservePort();
+    const spaceKey = formatSpaceKey(randomBytes(32));
+    const spaceId = await deriveSpaceId(parseSpaceKey(spaceKey));
+    const store = createHandoffStore(pool, RETENTION_WINDOW_MS);
+    const created = await store.createHandoff({
+      spaceId,
+      markdown: "# Initial",
+      redactionCount: 0,
+      origin: "mcp",
+    });
+    if (!created.ok) throw new Error("Expected the fixture Handoff to be created");
+
+    const config: ProductionConfig = {
+      port,
+      databaseUrl: DATABASE_URL!,
+      retentionWindowMs: RETENTION_WINDOW_MS,
+      logLevel: "silent",
+    };
+    let running: RunningServer | undefined;
+    const storage = new MemoryStorage();
+
+    try {
+      running = await startProduction(config);
+      const endpoint = `http://${running.host}:${running.port}`;
+      const request = (path: string, init?: RequestInit): Promise<Response> =>
+        fetch(`${endpoint}${path}`, init);
+      const controller = createHandoffWorkspaceController({
+        code: created.code,
+        sessionStorage: storage,
+        workingDraftStorage: createSessionWorkingDraftStorage(storage),
+        createClient: (key) => createBrowserApiClient(key, request),
+      });
+      await controller.submitSpaceKey(spaceKey);
+      const tools = createHandoffWebMcpTools(controller);
+
+      await expect(
+        executeWebMcpTool(webMcpTool(tools, "update_working_draft"), {
+          markdown: largeRichMarkdown,
+        }),
+      ).resolves.toMatchObject({
+        workingDraft: { markdown: largeRichMarkdown, lastModifiedVia: "webmcp" },
+      });
+
+      const humanMarker = "Human review completed for the large Working Draft.";
+      const humanEdited = `${largeRichMarkdown}\n${humanMarker}\n`;
+      controller.updateMarkdown(humanEdited, "human");
+      expect(controller.getState()).toMatchObject({
+        kind: "ready",
+        workingDraft: { markdown: humanEdited, lastModifiedVia: "human" },
+      });
+
+      await expect(
+        executeWebMcpTool(webMcpTool(tools, "get_handoff_context"), {}),
+      ).resolves.toMatchObject({
+        workingDraft: {
+          markdown: humanEdited,
+          lastModifiedVia: "human",
+          contributors: ["webmcp", "human"],
+        },
+      });
+
+      await expect(
+        executeWebMcpTool(webMcpTool(tools, "commit_working_draft"), {}),
+      ).resolves.toMatchObject({
+        ok: true,
+        revision: 2,
+        origin: "human",
+      });
+      expect(controller.getState()).toMatchObject({ kind: "ready", workingDraft: null });
+
+      await expect(
+        executeWebMcpTool(webMcpTool(tools, "read_revision"), { revision: 2 }),
+      ).resolves.toMatchObject({
+        revision: 2,
+        origin: "human",
+      });
+      const readBack = await controller.readRevision(2);
+      if (!readBack.ok) throw new Error("Expected the committed Revision to be readable");
+      expect(readBack.value.markdown).toBe(humanEdited);
+      expect(readBack.value.markdown).toContain(LARGE_RICH_MARKDOWN_START_SENTINEL);
+      expect(readBack.value.markdown).toContain(LARGE_RICH_MARKDOWN_END_SENTINEL);
+      expect(readBack.value.markdown).toContain(humanMarker);
+    } finally {
+      await running?.shutdown().catch(() => undefined);
+      await pool.query("DELETE FROM handoffs WHERE space_id = $1", [spaceId]);
+    }
+  }, 60_000);
 });
