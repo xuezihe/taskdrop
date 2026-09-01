@@ -28,7 +28,7 @@ Start the production server:
 
 ```bash
 PORT=3000 \
-DATABASE_URL=postgres://taskdrop:REPLACE_WITH_PASSWORD@127.0.0.1:5432/taskdrop \
+DATABASE_URL=postgres://db-user:db-password@127.0.0.1:5432/taskdrop \
 node dist/production/main.js
 ```
 
@@ -89,3 +89,46 @@ The Remote MCP endpoint can remain on a separate public origin if needed. The
 `TASKDROP_MCP_ORIGIN` environment variable (or `VITE_TASKDROP_MCP_ORIGIN`)
 controls the MCP config snippets shown on the landing page. It defaults to
 `https://taskdrop.xuezihe.com`.
+
+## Release verification
+
+After starting the runtime and Caddy, verify the deployment from the same
+browser-visible origin:
+
+```bash
+curl --fail-with-body https://taskdrop.example.com/health
+```
+
+Open `/handoff/<code>` as a top-level document and confirm that the Workspace
+loads, Browser API requests stay relative to the current origin, and the Remote
+MCP endpoint still responds at its configured `/mcp` origin. Supply the Space
+Key out of band; do not put it in commands, URLs, screenshots, logs, or release
+notes.
+
+The final WebMCP acceptance is the small-payload and representative-large
+Working Draft flow in the [Issue 12 checklist](../.scratch/webmcp-challenge/issues/12-harden-and-pass-final-acceptance.md).
+The primary runtime is the ChatGPT desktop built-in browser. Chrome is an
+auxiliary compatibility check and does not replace that acceptance.
+
+## Rollback
+
+Keep the previous application artifact (`dist/production` and
+`dist/landing`) until the new release has passed health, route, and primary
+acceptance checks. Application rollback is then:
+
+1. Stop the new Node runtime.
+2. Restore the previous application artifact and its environment configuration.
+3. Start the previous Node runtime on the same loopback port; Caddy can remain
+   in place if its routing has not changed.
+4. Re-run the health, top-level Workspace, same-origin Browser API, and Remote
+   MCP checks above.
+
+The migration runner records applied versions and only applies pending SQL
+files. It has no automatic down-migration path. Do not run an older binary
+against a schema it cannot support or invent a reverse migration during an
+incident. If a schema rollback is required, stop the service and restore the
+operator-approved PostgreSQL backup according to the deployment runbook, then
+repeat the verification checks.
+
+Never include `DATABASE_URL`, a Space Key, `localSpaceId`, or complete Handoff
+Markdown in rollback notes or acceptance evidence.

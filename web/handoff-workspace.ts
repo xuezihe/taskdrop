@@ -56,7 +56,11 @@ export async function mountHandoffWorkspace(root: HTMLElement, routeCode: string
   const view = createView(root, controller, routeCode);
   const unsubscribe = controller.subscribe(view.render);
   const webMcpBinding = bindHandoffWebMcpTools(controller);
+  let disposed = false;
   const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    controller.dispose();
     unsubscribe();
     webMcpBinding.dispose();
     view.destroy();
@@ -909,11 +913,7 @@ function createView(
     }
   });
   changeKey.addEventListener("click", () => {
-    destroyEditor();
-    resetHistoryView();
-    keyGate.hidden = false;
-    layout.hidden = true;
-    loadMessage.hidden = true;
+    controller.changeSpaceKey();
     keyInput.value = "";
     keyInput.focus();
   });

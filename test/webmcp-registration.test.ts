@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { formatSpaceKey } from "../src/production/space-identity.js";
-import type { BrowserApiClient, BrowserRevision } from "../web/browser-api-client.js";
+import type {
+  BrowserApiClient,
+  BrowserHistoryClientResult,
+  BrowserRevision,
+} from "../web/browser-api-client.js";
 import { createSessionWorkingDraftStorage } from "../web/handoff-session-storage.js";
 import {
   createHandoffWorkspaceController,
@@ -75,13 +79,13 @@ function fakeClient(): BrowserApiClient {
   };
 }
 
-function controller(): HandoffWorkspaceController {
+function controller(client: BrowserApiClient = fakeClient()): HandoffWorkspaceController {
   const storage = new MemoryStorage();
   return createHandoffWorkspaceController({
     code: "ABC001",
     sessionStorage: storage,
     workingDraftStorage: createSessionWorkingDraftStorage(storage),
-    createClient: () => fakeClient(),
+    createClient: () => client,
   });
 }
 
@@ -115,7 +119,7 @@ describe("Handoff WebMCP registration", () => {
     }
   });
 
-  it("progressively registers only while the Workspace is ready and aborts on disposal", async () => {
+  it("progressively registers only while the Workspace is ready and aborts when context ends", async () => {
     const workspace = controller();
     const signals: AbortSignal[] = [];
     const host: WebMcpDocument = {
@@ -135,8 +139,9 @@ describe("Handoff WebMCP registration", () => {
     const registrationSignal = signals[0]!;
     expect(registrationSignal.aborted).toBe(false);
 
-    binding.dispose();
+    workspace.changeSpaceKey();
     expect(registrationSignal.aborted).toBe(true);
+    binding.dispose();
   });
 
   it("leaves the Human Workspace usable when WebMCP is unavailable or registration fails", async () => {
@@ -159,6 +164,61 @@ describe("Handoff WebMCP registration", () => {
     await vi.waitFor(() => expect(signal?.aborted).toBe(true));
     expect(workspace.getState()).toMatchObject({ kind: "ready" });
     expect(workspace.updateMarkdown("# Human still works")).toEqual({ ok: true });
+    await expect(workspace.getRevisionHistory()).resolves.toMatchObject({ ok: true });
+    workspace.discard();
+    expect(workspace.getState()).toMatchObject({
+      kind: "ready",
+      workingDraft: null,
+    });
+    workspace.updateMarkdown("# Human commit still works");
+    await expect(workspace.commit()).resolves.toMatchObject({ ok: true });
     failing.dispose();
+  });
+
+  it("cancels a pending WebMCP operation when its page context changes", async () => {
+    let historySignal: AbortSignal | undefined;
+    let resolveHistory: ((result: BrowserHistoryClientResult) => void) | undefined;
+    const client: BrowserApiClient = {
+      getCurrent: async () => revision(),
+      getRevisionHistory: async (_code, signal) => {
+        historySignal = signal;
+        return new Promise((resolve) => {
+          resolveHistory = resolve;
+        });
+      },
+      readRevision: async () => revision(),
+      appendRevision: async () => revision(),
+    };
+    const workspace = controller(client);
+    await workspace.submitSpaceKey(SPACE_KEY);
+
+    let historyTool: WebMcpToolDefinition | undefined;
+    const host: WebMcpDocument = {
+      modelContext: {
+        registerTool: async (tool) => {
+          if (tool.name === "get_revision_history") historyTool = tool;
+        },
+      },
+    };
+    const binding = bindHandoffWebMcpTools(workspace, host);
+    await vi.waitFor(() => expect(historyTool).toBeDefined());
+
+    const execution = historyTool!.execute({}, { signal: new AbortController().signal });
+    await vi.waitFor(() => expect(historySignal).toBeDefined());
+    workspace.changeSpaceKey();
+    expect(historySignal?.aborted).toBe(true);
+    binding.dispose();
+    resolveHistory?.({
+      ok: true,
+      code: "ABC001",
+      latestRevision: 1,
+      expiresAt: "2026-08-29T08:00:00.000Z",
+      revisions: [],
+    });
+
+    await expect(execution).resolves.toEqual({
+      ok: false,
+      error: { code: "REQUEST_CANCELLED" },
+    });
   });
 });

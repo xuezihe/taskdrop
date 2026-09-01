@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { formatSpaceKey } from "../src/production/space-identity.js";
 import {
@@ -13,7 +13,10 @@ import type {
   BrowserRevision,
   BrowserRevisionHistory,
 } from "../web/browser-api-client.js";
-import { createSessionWorkingDraftStorage } from "../web/handoff-session-storage.js";
+import {
+  createSessionWorkingDraftStorage,
+  SPACE_KEY_STORAGE_KEY,
+} from "../web/handoff-session-storage.js";
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>();
@@ -429,6 +432,130 @@ describe("Handoff Workspace controller", () => {
       }),
     );
     await expect(firstCommit).resolves.toMatchObject({ ok: true, value: { revision: 2 } });
+  });
+
+  it("aborts an older Space Key load and ignores its late result", async () => {
+    const storage = new MemoryStorage();
+    let firstSignal: AbortSignal | undefined;
+    let secondSignal: AbortSignal | undefined;
+    let resolveFirst: ((result: BrowserClientResult) => void) | undefined;
+    let resolveSecond: ((result: BrowserClientResult) => void) | undefined;
+    const firstClient: BrowserApiClient = {
+      getCurrent: async (_code, signal) => {
+        firstSignal = signal;
+        return new Promise((resolve) => {
+          resolveFirst = resolve;
+        });
+      },
+      getRevisionHistory: async () => history(),
+      readRevision: async () => revision(),
+      appendRevision: async () => revision(),
+    };
+    const secondClient: BrowserApiClient = {
+      getCurrent: async (_code, signal) => {
+        secondSignal = signal;
+        return new Promise((resolve) => {
+          resolveSecond = resolve;
+        });
+      },
+      getRevisionHistory: async () => history(),
+      readRevision: async () => revision(),
+      appendRevision: async () => revision(),
+    };
+    const controller = createController(
+      storage,
+      new Map([
+        [SPACE_KEY, firstClient],
+        [OTHER_SPACE_KEY, secondClient],
+      ]),
+    );
+
+    const firstLoad = controller.submitSpaceKey(SPACE_KEY);
+    await vi.waitFor(() => expect(firstSignal).toBeDefined());
+    const secondLoad = controller.submitSpaceKey(OTHER_SPACE_KEY);
+    await vi.waitFor(() => expect(secondSignal).toBeDefined());
+
+    expect(firstSignal?.aborted).toBe(true);
+    resolveFirst?.(revision({ markdown: "# Late first Space" }));
+    resolveSecond?.(revision({ markdown: "# Second Space" }));
+    await Promise.all([firstLoad, secondLoad]);
+
+    expect(readyState(controller)).toMatchObject({
+      committed: { markdown: "# Second Space" },
+    });
+  });
+
+  it("changes Space Key without deleting the namespaced Working Draft", async () => {
+    const storage = new MemoryStorage();
+    const controller = createController(
+      storage,
+      new Map([[SPACE_KEY, fakeClient(success(revision()))]]),
+    );
+
+    await controller.submitSpaceKey(SPACE_KEY);
+    controller.updateMarkdown("# Recover after changing Space");
+    controller.changeSpaceKey();
+
+    expect(controller.getState()).toEqual({
+      kind: "needs-space-key",
+      code: "ABC001",
+      inputError: null,
+    });
+    expect(storage.getItem(SPACE_KEY_STORAGE_KEY)).toBeNull();
+    expect(controller.updateMarkdown("# Must not reach old Space")).toEqual({
+      ok: false,
+      error: { code: "WORKSPACE_NOT_READY" },
+    });
+
+    await controller.submitSpaceKey(SPACE_KEY);
+    expect(readyState(controller).workingDraft).toMatchObject({
+      markdown: "# Recover after changing Space",
+    });
+  });
+
+  it("cancels a pending Commit on dispose without clearing the local Draft", async () => {
+    const storage = new MemoryStorage();
+    let appendSignal: AbortSignal | undefined;
+    let resolveAppend: ((result: BrowserClientResult) => void) | undefined;
+    const client: BrowserApiClient = {
+      getCurrent: async () => revision(),
+      getRevisionHistory: async () => history(),
+      readRevision: async () => revision(),
+      appendRevision: async (_input, signal) => {
+        appendSignal = signal;
+        return new Promise((resolve) => {
+          resolveAppend = resolve;
+        });
+      },
+    };
+    const controller = createController(storage, new Map([[SPACE_KEY, client]]));
+    await controller.submitSpaceKey(SPACE_KEY);
+    controller.updateMarkdown("# Keep after page disposal");
+
+    const pendingCommit = controller.commit();
+    await vi.waitFor(() => expect(appendSignal).toBeDefined());
+    controller.dispose();
+    expect(appendSignal?.aborted).toBe(true);
+    resolveAppend?.(revision({ revision: 2, latestRevision: 2 }));
+
+    await expect(pendingCommit).resolves.toEqual({
+      ok: false,
+      error: { code: "REQUEST_CANCELLED" },
+    });
+    expect(controller.getState()).toMatchObject({ kind: "needs-space-key" });
+    expect(controller.updateMarkdown("# No mutation after dispose")).toEqual({
+      ok: false,
+      error: { code: "WORKSPACE_NOT_READY" },
+    });
+
+    const recovered = createController(
+      storage,
+      new Map([[SPACE_KEY, fakeClient(success(revision()))]]),
+    );
+    await recovered.submitSpaceKey(SPACE_KEY);
+    expect(readyState(recovered).workingDraft).toMatchObject({
+      markdown: "# Keep after page disposal",
+    });
   });
 
   it("discards only the current Draft and restores the loaded committed Markdown", async () => {

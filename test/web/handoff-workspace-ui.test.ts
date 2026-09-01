@@ -122,6 +122,8 @@ describe("Handoff Workspace UI", () => {
         if (listener) listener(ready, "workspace-reset");
       },
       submitSpaceKey: async () => {},
+      changeSpaceKey: () => {},
+      dispose: () => {},
       getRevisionHistory: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
       readRevision: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
       updateMarkdown: () => ({ ok: true }),
@@ -164,6 +166,70 @@ describe("Handoff Workspace UI", () => {
     root.remove();
   });
 
+  it("delegates Space Key changes and page disposal to the active lifecycle", async () => {
+    const { createHandoffWorkspaceController } =
+      await import("../../web/handoff-workspace-controller.js");
+    const { mountWorkingDraftEditor } = await import("../../web/working-draft-editor.js");
+    const { mountHandoffWorkspace } = await import("../../web/handoff-workspace.js");
+
+    let currentState: WorkspaceState = readyState();
+    let listener:
+      | ((
+          state: WorkspaceState,
+          reason: import("../../web/handoff-workspace-controller.js").MarkdownChangeReason,
+        ) => void)
+      | undefined;
+    const changeSpaceKey = vi.fn(() => {
+      currentState = { kind: "needs-space-key", code: "ABC001", inputError: null };
+      listener?.(currentState, null);
+    });
+    const dispose = vi.fn();
+    const controller: HandoffWorkspaceController = {
+      getState: () => currentState,
+      subscribe: (nextListener) => {
+        listener = nextListener;
+        return () => {
+          listener = undefined;
+        };
+      },
+      open: async () => {
+        listener?.(currentState, "workspace-reset");
+      },
+      submitSpaceKey: async () => {},
+      changeSpaceKey,
+      dispose,
+      getRevisionHistory: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
+      readRevision: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
+      updateMarkdown: () => ({ ok: true }),
+      discard: () => {},
+      commit: async () => ({ ok: false, error: { code: "NO_WORKING_DRAFT" } }),
+      resolveRevisionConflict: async () => ({
+        ok: false,
+        error: { code: "WORKSPACE_NOT_READY" },
+      }),
+    };
+
+    vi.mocked(createHandoffWorkspaceController).mockReturnValue(controller);
+    vi.mocked(mountWorkingDraftEditor).mockResolvedValue({
+      replaceMarkdown: vi.fn(),
+      setReadOnly: vi.fn(),
+      destroy: async () => {},
+    });
+
+    const root = document.createElement("div");
+    document.body.append(root);
+    await mountHandoffWorkspace(root, "ABC001");
+
+    root.querySelector<HTMLButtonElement>(".workspace-change-key")?.click();
+    expect(changeSpaceKey).toHaveBeenCalledOnce();
+    expect(root.querySelector<HTMLElement>(".workspace-key-gate")?.hidden).toBe(false);
+    expect(root.querySelector<HTMLElement>(".workspace-layout")?.hidden).toBe(true);
+
+    window.dispatchEvent(new Event("pagehide"));
+    expect(dispose).toHaveBeenCalledOnce();
+    root.remove();
+  });
+
   it("loads and renders a newest-first Revision timeline", async () => {
     const { createHandoffWorkspaceController } =
       await import("../../web/handoff-workspace-controller.js");
@@ -198,6 +264,8 @@ describe("Handoff Workspace UI", () => {
         listener?.(currentState, "workspace-reset");
       },
       submitSpaceKey: async () => {},
+      changeSpaceKey: () => {},
+      dispose: () => {},
       getRevisionHistory,
       readRevision: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
       updateMarkdown: () => ({ ok: true }),
@@ -299,6 +367,8 @@ describe("Handoff Workspace UI", () => {
         listener?.(currentState, "workspace-reset");
       },
       submitSpaceKey: async () => {},
+      changeSpaceKey: () => {},
+      dispose: () => {},
       getRevisionHistory,
       readRevision,
       updateMarkdown,
@@ -421,6 +491,8 @@ describe("Handoff Workspace UI", () => {
         listener?.(currentState, "workspace-reset");
       },
       submitSpaceKey: async () => {},
+      changeSpaceKey: () => {},
+      dispose: () => {},
       getRevisionHistory: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
       readRevision: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
       updateMarkdown: () => ({ ok: true }),
@@ -539,6 +611,8 @@ describe("Handoff Workspace UI", () => {
         listener?.(currentState, "workspace-reset");
       },
       submitSpaceKey: async () => {},
+      changeSpaceKey: () => {},
+      dispose: () => {},
       getRevisionHistory,
       readRevision,
       updateMarkdown: () => ({ ok: true }),
@@ -665,6 +739,8 @@ describe("Handoff Workspace UI", () => {
       subscribe: () => () => {},
       open: async () => {},
       submitSpaceKey: async () => {},
+      changeSpaceKey: () => {},
+      dispose: () => {},
       getRevisionHistory: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
       readRevision: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
       updateMarkdown: () => ({ ok: true }),
@@ -730,6 +806,8 @@ describe("Handoff Workspace UI", () => {
       subscribe: () => () => {},
       open: async () => {},
       submitSpaceKey: async () => {},
+      changeSpaceKey: () => {},
+      dispose: () => {},
       getRevisionHistory: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
       readRevision: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
       updateMarkdown: () => ({ ok: true }),
@@ -811,6 +889,8 @@ describe("Handoff Workspace UI", () => {
         if (listener) listener(ready, "workspace-reset");
       },
       submitSpaceKey: async () => {},
+      changeSpaceKey: () => {},
+      dispose: () => {},
       getRevisionHistory: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
       readRevision: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
       updateMarkdown: () => ({ ok: true }),
@@ -915,6 +995,8 @@ describe("Handoff Workspace UI", () => {
         if (listener) listener(ready, "workspace-reset");
       },
       submitSpaceKey: async () => {},
+      changeSpaceKey: () => {},
+      dispose: () => {},
       getRevisionHistory: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
       readRevision: async () => ({ ok: false, error: { code: "WORKSPACE_NOT_READY" } }),
       updateMarkdown,

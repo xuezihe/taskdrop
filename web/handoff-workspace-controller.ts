@@ -3,6 +3,7 @@ import { isCanonicalSpaceKey } from "../src/production/space-identity.js";
 import {
   deriveLocalSpaceId,
   getStoredSpaceKey,
+  removeStoredSpaceKey,
   setStoredSpaceKey,
   type WorkingDraftStorage,
 } from "./handoff-session-storage.js";
@@ -75,6 +76,8 @@ export interface HandoffWorkspaceController {
   subscribe(listener: WorkspaceListener): () => void;
   open(): Promise<void>;
   submitSpaceKey(spaceKey: string): Promise<void>;
+  changeSpaceKey(): void;
+  dispose(): void;
   getRevisionHistory(signal?: AbortSignal): Promise<WorkspaceHistoryResult>;
   readRevision(revision: number, signal?: AbortSignal): Promise<WorkspaceCommandResult>;
   updateMarkdown(markdown: string, surface?: EditSurface): WorkspaceUpdateResult;
@@ -97,6 +100,13 @@ export interface HandoffWorkspaceControllerOptions {
 export function createHandoffWorkspaceController(
   options: HandoffWorkspaceControllerOptions,
 ): HandoffWorkspaceController {
+  type WorkspaceContext = { controller: AbortController };
+  type ActiveSpace = {
+    context: WorkspaceContext;
+    localSpaceId: string;
+    client: BrowserApiClient;
+  };
+
   const listeners = new Set<WorkspaceListener>();
   const now = options.now ?? (() => new Date().toISOString());
   let state: WorkspaceState = {
@@ -104,8 +114,9 @@ export function createHandoffWorkspaceController(
     code: options.code,
     inputError: null,
   };
-  let activeSpace: { localSpaceId: string; client: BrowserApiClient } | null = null;
-  let loadSequence = 0;
+  let activeSpace: ActiveSpace | null = null;
+  let context: WorkspaceContext = { controller: new AbortController() };
+  let disposed = false;
 
   const notify = (reason: MarkdownChangeReason): void => {
     for (const listener of listeners) listener(state, reason);
@@ -116,23 +127,52 @@ export function createHandoffWorkspaceController(
     notify(reason);
   };
 
-  const loadWithSpaceKey = async (spaceKey: string): Promise<void> => {
-    const sequence = ++loadSequence;
+  const replaceContext = (): WorkspaceContext => {
+    context.controller.abort();
+    context = { controller: new AbortController() };
     activeSpace = null;
+    return context;
+  };
+
+  const isCurrentContext = (candidate: WorkspaceContext): boolean =>
+    !disposed && context === candidate && !candidate.controller.signal.aborted;
+
+  const isCurrentSpace = (candidate: ActiveSpace): boolean =>
+    isCurrentContext(candidate.context) && activeSpace === candidate && state.kind === "ready";
+
+  const requestSignal = (
+    candidate: WorkspaceContext,
+    callerSignal: AbortSignal | undefined,
+  ): AbortSignal =>
+    callerSignal
+      ? AbortSignal.any([candidate.controller.signal, callerSignal])
+      : candidate.controller.signal;
+
+  const cancelled = (): { ok: false; error: { code: "REQUEST_CANCELLED" } } => ({
+    ok: false,
+    error: { code: "REQUEST_CANCELLED" },
+  });
+
+  const loadWithSpaceKey = async (
+    spaceKey: string,
+    nextContext: WorkspaceContext = replaceContext(),
+  ): Promise<void> => {
+    if (disposed) return;
     setState({ kind: "loading", code: options.code }, null);
 
     try {
       const localSpaceId = await deriveLocalSpaceId(spaceKey);
+      if (!isCurrentContext(nextContext)) return;
       const client = options.createClient(spaceKey);
-      const result = await client.getCurrent(options.code);
-      if (sequence !== loadSequence) return;
+      const result = await client.getCurrent(options.code, nextContext.controller.signal);
+      if (!isCurrentContext(nextContext)) return;
       if (!result.ok) {
         setState({ kind: "load-error", code: options.code, error: result.error }, null);
         return;
       }
 
       const workingDraft = options.workingDraftStorage.load(localSpaceId, result.code);
-      activeSpace = { localSpaceId, client };
+      activeSpace = { context: nextContext, localSpaceId, client };
       setState(
         {
           kind: "ready",
@@ -145,7 +185,7 @@ export function createHandoffWorkspaceController(
         "workspace-reset",
       );
     } catch {
-      if (sequence !== loadSequence) return;
+      if (!isCurrentContext(nextContext)) return;
       setState(
         {
           kind: "load-error",
@@ -161,14 +201,16 @@ export function createHandoffWorkspaceController(
     getState: () => state,
 
     subscribe(listener): () => void {
+      if (disposed) return () => undefined;
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
 
     async open(): Promise<void> {
+      if (disposed) return;
       const spaceKey = getStoredSpaceKey(options.sessionStorage);
       if (!spaceKey) {
-        activeSpace = null;
+        replaceContext();
         setState({ kind: "needs-space-key", code: options.code, inputError: null }, null);
         return;
       }
@@ -177,6 +219,8 @@ export function createHandoffWorkspaceController(
 
     async submitSpaceKey(spaceKey: string): Promise<void> {
       if (!isCanonicalSpaceKey(spaceKey)) {
+        if (disposed) return;
+        replaceContext();
         setState(
           {
             kind: "needs-space-key",
@@ -187,6 +231,8 @@ export function createHandoffWorkspaceController(
         );
         return;
       }
+      if (disposed) return;
+      const nextContext = replaceContext();
       try {
         setStoredSpaceKey(options.sessionStorage, spaceKey);
       } catch {
@@ -200,11 +246,39 @@ export function createHandoffWorkspaceController(
         );
         return;
       }
-      await loadWithSpaceKey(spaceKey);
+      await loadWithSpaceKey(spaceKey, nextContext);
+    },
+
+    changeSpaceKey(): void {
+      if (disposed) return;
+      replaceContext();
+      try {
+        removeStoredSpaceKey(options.sessionStorage);
+        setState({ kind: "needs-space-key", code: options.code, inputError: null }, null);
+      } catch {
+        setState(
+          {
+            kind: "needs-space-key",
+            code: options.code,
+            inputError: { code: "SPACE_KEY_STORAGE_ERROR" },
+          },
+          null,
+        );
+      }
+    },
+
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      context.controller.abort();
+      activeSpace = null;
+      state = { kind: "needs-space-key", code: options.code, inputError: null };
+      notify(null);
+      listeners.clear();
     },
 
     async getRevisionHistory(signal?: AbortSignal): Promise<WorkspaceHistoryResult> {
-      if (state.kind !== "ready" || !activeSpace) {
+      if (disposed || state.kind !== "ready" || !activeSpace) {
         return { ok: false, error: { code: "WORKSPACE_NOT_READY" } };
       }
       if (signal?.aborted) {
@@ -212,12 +286,15 @@ export function createHandoffWorkspaceController(
       }
 
       const space = activeSpace;
+      const combinedSignal = requestSignal(space.context, signal);
       let result;
       try {
-        result = await space.client.getRevisionHistory(state.committed.code, signal);
+        result = await space.client.getRevisionHistory(state.committed.code, combinedSignal);
       } catch {
+        if (combinedSignal.aborted) return cancelled();
         return { ok: false, error: { code: "NETWORK_ERROR" } };
       }
+      if (combinedSignal.aborted) return cancelled();
       if (activeSpace !== space || state.kind !== "ready") {
         return { ok: false, error: { code: "WORKSPACE_NOT_READY" } };
       }
@@ -225,7 +302,7 @@ export function createHandoffWorkspaceController(
     },
 
     async readRevision(revision: number, signal?: AbortSignal): Promise<WorkspaceCommandResult> {
-      if (state.kind !== "ready" || !activeSpace) {
+      if (disposed || state.kind !== "ready" || !activeSpace) {
         return { ok: false, error: { code: "WORKSPACE_NOT_READY" } };
       }
       if (signal?.aborted) {
@@ -233,12 +310,15 @@ export function createHandoffWorkspaceController(
       }
 
       const space = activeSpace;
+      const combinedSignal = requestSignal(space.context, signal);
       let result: BrowserClientResult;
       try {
-        result = await space.client.readRevision(state.committed.code, revision, signal);
+        result = await space.client.readRevision(state.committed.code, revision, combinedSignal);
       } catch {
+        if (combinedSignal.aborted) return cancelled();
         return { ok: false, error: { code: "NETWORK_ERROR" } };
       }
+      if (combinedSignal.aborted) return cancelled();
       if (activeSpace !== space || state.kind !== "ready") {
         return { ok: false, error: { code: "WORKSPACE_NOT_READY" } };
       }
@@ -246,7 +326,7 @@ export function createHandoffWorkspaceController(
     },
 
     updateMarkdown(markdown: string, surface: EditSurface = "human"): WorkspaceUpdateResult {
-      if (state.kind !== "ready" || !activeSpace) {
+      if (disposed || state.kind !== "ready" || !activeSpace) {
         return { ok: false, error: { code: "WORKSPACE_NOT_READY" } };
       }
       if (state.commitPending) {
@@ -292,7 +372,7 @@ export function createHandoffWorkspaceController(
     },
 
     discard(): void {
-      if (state.kind !== "ready" || !state.workingDraft || !activeSpace) return;
+      if (disposed || state.kind !== "ready" || !state.workingDraft || !activeSpace) return;
       try {
         options.workingDraftStorage.remove(activeSpace.localSpaceId, state.committed.code);
         setState({ ...state, workingDraft: null, actionError: null }, "workspace-reset");
@@ -302,6 +382,9 @@ export function createHandoffWorkspaceController(
     },
 
     async commit(signal?: AbortSignal): Promise<WorkspaceCommandResult> {
+      if (disposed) {
+        return { ok: false, error: { code: "WORKSPACE_NOT_READY" } };
+      }
       if (state.kind !== "ready" || !state.workingDraft || !activeSpace) {
         return { ok: false, error: { code: "NO_WORKING_DRAFT" } };
       }
@@ -318,6 +401,7 @@ export function createHandoffWorkspaceController(
       const draft = state.workingDraft;
       const committed = state.committed;
       const space = activeSpace;
+      const combinedSignal = requestSignal(space.context, signal);
       setState({ ...state, commitPending: true, actionError: null }, null);
 
       let result: BrowserClientResult;
@@ -329,12 +413,22 @@ export function createHandoffWorkspaceController(
             markdown: draft.markdown,
             origin: draft.lastModifiedVia,
           },
-          signal,
+          combinedSignal,
         );
       } catch {
         result = { ok: false, error: { code: "NETWORK_ERROR" } };
       }
 
+      if (combinedSignal.aborted) {
+        if (!isCurrentSpace(space) || state.workingDraft !== draft || !state.commitPending) {
+          return cancelled();
+        }
+        setState(
+          { ...state, commitPending: false, actionError: { code: "REQUEST_CANCELLED" } },
+          null,
+        );
+        return cancelled();
+      }
       if (state.kind !== "ready" || state.workingDraft !== draft || !state.commitPending) {
         return result.ok ? { ok: true, value: result } : result;
       }
@@ -376,7 +470,7 @@ export function createHandoffWorkspaceController(
       choice: RevisionConflictChoice,
       signal?: AbortSignal,
     ): Promise<WorkspaceCommandResult> {
-      if (state.kind !== "ready" || !activeSpace) {
+      if (disposed || state.kind !== "ready" || !activeSpace) {
         return { ok: false, error: { code: "WORKSPACE_NOT_READY" } };
       }
       if (!state.workingDraft) {
@@ -399,13 +493,14 @@ export function createHandoffWorkspaceController(
       const draft = state.workingDraft;
       const committed = state.committed;
       const space = activeSpace;
+      const combinedSignal = requestSignal(space.context, signal);
       setState({ ...state, commitPending: true }, null);
 
       let result: BrowserClientResult;
       try {
         result =
           choice === "use-server-latest"
-            ? await space.client.getCurrent(committed.code, signal)
+            ? await space.client.getCurrent(committed.code, combinedSignal)
             : await space.client.appendRevision(
                 {
                   code: committed.code,
@@ -413,12 +508,22 @@ export function createHandoffWorkspaceController(
                   markdown: draft.markdown,
                   origin: draft.lastModifiedVia,
                 },
-                signal,
+                combinedSignal,
               );
       } catch {
         result = { ok: false, error: { code: "NETWORK_ERROR" } };
       }
 
+      if (combinedSignal.aborted) {
+        if (!isCurrentSpace(space) || state.workingDraft !== draft || !state.commitPending) {
+          return cancelled();
+        }
+        setState(
+          { ...state, commitPending: false, actionError: { code: "REQUEST_CANCELLED" } },
+          null,
+        );
+        return cancelled();
+      }
       if (state.kind !== "ready" || state.workingDraft !== draft || !state.commitPending) {
         return result.ok ? { ok: true, value: result } : result;
       }

@@ -24,6 +24,10 @@ export function setStoredSpaceKey(storage: Storage, spaceKey: string): void {
   storage.setItem(SPACE_KEY_STORAGE_KEY, spaceKey);
 }
 
+export function removeStoredSpaceKey(storage: Storage): void {
+  storage.removeItem(SPACE_KEY_STORAGE_KEY);
+}
+
 export async function deriveLocalSpaceId(spaceKey: string): Promise<string> {
   const spaceId = await deriveSpaceId(parseSpaceKey(spaceKey));
   return Array.from(spaceId, (byte) => byte.toString(16).padStart(2, "0")).join("");
