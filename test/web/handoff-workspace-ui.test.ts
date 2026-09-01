@@ -510,6 +510,17 @@ describe("Handoff Workspace UI", () => {
       "Revision Three",
     );
 
+    root.querySelector<HTMLButtonElement>('[aria-label="Read Revision 1"]')?.click();
+    await wait(0);
+    currentState = { kind: "loading", code: "ABC001" };
+    listener?.(currentState, null);
+    pendingReads.get(1)?.({ ok: true, value: historicalOne });
+    await wait(0);
+    expect(root.querySelector<HTMLElement>(".workspace-history-document")?.hidden).toBe(true);
+    expect(root.querySelector(".workspace-history-document-content")?.textContent).not.toContain(
+      "Revision One",
+    );
+
     root.remove();
   });
 

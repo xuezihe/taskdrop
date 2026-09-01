@@ -336,7 +336,7 @@ function createView(
   let destroyed = false;
   let editorUnsupported: RichWorkingDraftBlocker | null = null;
   let historyState: RevisionHistoryViewState = { kind: "idle" };
-  let historySource: BrowserRevision | null = null;
+  let historyForCommittedRevision: BrowserRevision | null = null;
   let documentSelection: DocumentSelection = { kind: "working-draft" };
   let historyRequestToken = 0;
   let revisionReadToken = 0;
@@ -353,7 +353,7 @@ function createView(
 
   const resetHistoryView = (): void => {
     invalidateHistoryRequests();
-    historySource = null;
+    historyForCommittedRevision = null;
     historyState = { kind: "idle" };
     documentSelection = { kind: "working-draft" };
   };
@@ -480,8 +480,8 @@ function createView(
   }
 
   function ensureHistory(state: ReadyWorkspaceState): void {
-    if (historySource === state.committed) return;
-    historySource = state.committed;
+    if (historyForCommittedRevision === state.committed) return;
+    historyForCommittedRevision = state.committed;
     requestHistory(state.committed);
   }
 
