@@ -1,12 +1,20 @@
 # TaskDrop single-server Operator Runbook
 
-This Runbook operates the M3 private dogfood deployment described in
+This Runbook operates the public single-server deployment described in
 [DEPLOY.md](./DEPLOY.md). Commands assume a root shell, the `dev` checkout at
 `/root/Proj/taskDrop`, PostgreSQL from `deploy/server/compose.yml`, and the
-Application managed by `nohup`.
+Application managed by `nohup`. Caddy serves the active Web artifact through
+`/var/www/taskdrop/current` and proxies the same-origin Browser API.
 
 Never paste a Space Key, Handoff Code, Markdown, Authorization value, complete
 Query URL, or database URL into an incident report or chat.
+
+Set the public hostname once in each operator shell before using the public
+checks or release commands:
+
+```bash
+taskdrop_public_host=taskdrop.example.com
+```
 
 ## Status and health
 
@@ -23,10 +31,24 @@ systemctl status caddy --no-pager
 Run the public health check with the configured hostname:
 
 ```bash
-curl --fail --silent --show-error https://<TASKDROP_MCP_HOST>/health
+curl --fail --silent --show-error "https://$taskdrop_public_host/health"
+curl --fail --silent --show-error "https://$taskdrop_public_host/" \
+  --output /dev/null
+curl --fail --silent --show-error \
+  "https://$taskdrop_public_host/handoff/ABC123" \
+  --output /dev/null
+browser_api_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  "https://$taskdrop_public_host/api/handoffs/ABC123")"
+test "$browser_api_status" = 401
+unset browser_api_status
+readlink -f /var/www/taskdrop/current
 ```
 
 `{"status":"ok"}` means the listener and PostgreSQL health probe succeeded.
+The root and disposable Handoff path must return the Workspace HTML rather than 404. The unauthenticated `/api/*` probe must return 401, proving that the route
+reached the Node credential boundary rather than the SPA fallback. These checks
+do not prove authenticated Browser API behavior or WebMCP discovery by
+themselves.
 HTTP 503 with `{"status":"unavailable"}` usually means PostgreSQL is not
 reachable. A 502 from Caddy usually means the Application is not listening.
 
@@ -185,8 +207,8 @@ unset backup_path
 ```
 
 This is a practical logical backup, not a complete disaster-recovery program.
-M3 does not provide point-in-time recovery, automated restore, cross-host
-replication, or a restore drill.
+This deployment does not provide point-in-time recovery, automated restore,
+cross-host replication, or a restore drill.
 
 ## Upgrade the dev checkout
 
@@ -199,7 +221,7 @@ git status --short
 git rev-parse HEAD
 git pull --ff-only origin dev
 pnpm install --frozen-lockfile
-pnpm verify
+TASKDROP_MCP_ORIGIN="https://$taskdrop_public_host" pnpm verify
 ```
 
 The currently running Node process can stay up during install, verification,
@@ -216,9 +238,22 @@ test "$migration_status" -eq 0
 unset migration_status
 ```
 
-If migration fails, leave the current process running and investigate. If it
-succeeds, gracefully stop and start the Application, then verify loopback and
-public health plus one retained Handoff.
+If migration fails, leave the current process and Web symlink unchanged and
+investigate. If it succeeds, publish `dist/landing` to a new immutable
+`/var/www/taskdrop/releases/<commit>` directory using the procedure in
+[DEPLOY.md](./DEPLOY.md), gracefully stop and start the Application, and then
+verify:
+
+- loopback and public health;
+- `/` and `/handoff/ABC123` SPA delivery;
+- same-origin Browser API read and Commit;
+- Remote MCP create/read/append behavior;
+- one retained Handoff after restart; and
+- the five page-scoped tools in the ChatGPT Desktop built-in browser when this
+  is a WebMCP release.
+
+The Node checkout commit and `/var/www/taskdrop/current` release must match
+before acceptance is recorded.
 
 ## Simple code rollback
 
@@ -230,12 +265,21 @@ cd /root/Proj/taskDrop
 git status --short
 git switch --detach <KNOWN_GOOD_COMMIT>
 pnpm install --frozen-lockfile
-pnpm verify
+TASKDROP_MCP_ORIGIN="https://$taskdrop_public_host" pnpm verify
 ```
 
-Then run the explicit migration command. On success, gracefully restart and
-verify health. Return to ongoing development later with `git switch dev` after
-checking that the working tree is clean.
+Then run the explicit migration command and publish `dist/landing` from the
+same known-good commit to its immutable Web release directory. Switch
+`/var/www/taskdrop/current` to that release, gracefully restart, and repeat the
+health, SPA, same-origin Browser API, Remote MCP, and WebMCP checks. If the
+rollback requires a schema reversal, stop: TaskDrop has no automatic down
+migration. Restore an operator-approved PostgreSQL backup only through the
+separate database recovery decision.
+
+Return to ongoing development later with `git switch dev` after checking that
+the working tree is clean. Keep the failed Web release for diagnosis until it
+is safe to remove; do not delete the active or previous release by an
+unresolved glob.
 
 ## Troubleshooting
 
@@ -292,12 +336,46 @@ Docker prune or delete the TaskDrop volume as an emergency first step.
 Check loopback health and the Application PID first, then validate Caddy. A 502
 usually means Caddy cannot reach `127.0.0.1:3000`.
 
+### Workspace or `/handoff/:code` returns 404 or 403
+
+Confirm the active Web release and Caddy traversal permissions:
+
+```bash
+readlink -f /var/www/taskdrop/current
+namei -l /var/www/taskdrop/current/index.html
+sudo -u caddy test -r /var/www/taskdrop/current/index.html
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+```
+
+The Caddy site must serve `/var/www/taskdrop/current`, proxy `/api/*`, and use
+`/index.html` as the static fallback. Do not point the Caddy service into
+`/root/Proj/taskDrop`. If `/` works but `/handoff/:code` returns 404, inspect
+the `try_files` fallback. If the page loads but API calls fail, verify that
+`/api/*` is proxied without stripping `/api`.
+
+### Workspace shows the wrong Remote MCP origin
+
+`TASKDROP_MCP_ORIGIN` is embedded during `pnpm build:web` or `pnpm verify`.
+Changing the Node environment does not change an existing static artifact.
+Rebuild with the correct public origin, publish a new immutable Web release,
+and switch the symlink.
+
+### Human Workspace works but WebMCP tools are missing
+
+First confirm `/handoff/:code` is the top-level HTTPS document in the supported
+ChatGPT Desktop built-in browser. Inspect proxy/CDN response policies and make
+sure they do not disable the WebMCP `tools` capability for the top-level page.
+Verify current WebMCP browser requirements against the official sources before
+changing security headers. Treat Chrome as an auxiliary check only. A WebMCP
+registration failure must not be treated as a reason to disable the Human
+Workspace.
+
 ### Cloudflare returns 403 to an MCP client
 
 If a browser works but a normal CLI User-Agent fails, disable Browser Integrity
-Check and browser challenges for the MCP hostname. Keep a cache-bypass rule for
-that hostname. Do not work around the problem by embedding the credential in a
-public diagnostic URL.
+Check and browser challenges for the public hostname. Keep cache-bypass rules
+for `/api/*`, `/mcp`, and `/health`. Do not work around the problem by embedding
+the credential in a public diagnostic URL.
 
 ### A credential entered retained logs
 
