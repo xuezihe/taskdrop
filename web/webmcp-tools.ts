@@ -107,7 +107,7 @@ export function createHandoffWebMcpTools(
       execute: (input, options) =>
         safelyExecute(async () => {
           if (!noInputSchema.safeParse(input).success) return INVALID_REQUEST;
-          if (isCancelled(options.signal, lifecycleSignal)) return REQUEST_CANCELLED;
+          if (isCancelled(options?.signal, lifecycleSignal)) return REQUEST_CANCELLED;
           return contextFromState(controller.getState());
         }),
     },
@@ -121,7 +121,7 @@ export function createHandoffWebMcpTools(
       execute: (input, options) =>
         safelyExecute(async () => {
           if (!noInputSchema.safeParse(input).success) return INVALID_REQUEST;
-          const signal = combineSignals(options.signal, lifecycleSignal);
+          const signal = combineSignals(options?.signal, lifecycleSignal);
           if (signal.aborted) return REQUEST_CANCELLED;
           const result = await controller.getRevisionHistory(signal);
           return result.ok ? result.value.revisions : result;
@@ -137,7 +137,7 @@ export function createHandoffWebMcpTools(
         safelyExecute(async () => {
           const parsed = revisionInputSchema.safeParse(input);
           if (!parsed.success) return INVALID_REQUEST;
-          const signal = combineSignals(options.signal, lifecycleSignal);
+          const signal = combineSignals(options?.signal, lifecycleSignal);
           if (signal.aborted) return REQUEST_CANCELLED;
           const result = await controller.readRevision(parsed.data.revision, signal);
           if (!result.ok) return result;
@@ -160,7 +160,7 @@ export function createHandoffWebMcpTools(
         safelyExecute(async () => {
           const parsed = updateDraftInputSchema.safeParse(input);
           if (!parsed.success) return INVALID_REQUEST;
-          if (isCancelled(options.signal, lifecycleSignal)) return REQUEST_CANCELLED;
+          if (isCancelled(options?.signal, lifecycleSignal)) return REQUEST_CANCELLED;
           const update = controller.updateMarkdown(parsed.data.markdown, "webmcp");
           if (!update.ok) return update;
           return contextFromState(controller.getState());
@@ -176,7 +176,7 @@ export function createHandoffWebMcpTools(
       execute: (input, options) =>
         safelyExecute(async () => {
           if (!noInputSchema.safeParse(input).success) return INVALID_REQUEST;
-          const signal = combineSignals(options.signal, lifecycleSignal);
+          const signal = combineSignals(options?.signal, lifecycleSignal);
           if (signal.aborted) return REQUEST_CANCELLED;
           const result = await controller.commit(signal);
           return result.ok ? result.value : result;
@@ -204,15 +204,19 @@ function contextFromState(state: WorkspaceState): HandoffContext | ToolErrorResu
   };
 }
 
-function combineSignals(executionSignal: AbortSignal, lifecycleSignal: AbortSignal | undefined) {
+function combineSignals(
+  executionSignal: AbortSignal | undefined,
+  lifecycleSignal: AbortSignal | undefined,
+): AbortSignal {
+  if (!executionSignal) return lifecycleSignal ?? new AbortController().signal;
   return lifecycleSignal ? AbortSignal.any([executionSignal, lifecycleSignal]) : executionSignal;
 }
 
 function isCancelled(
-  executionSignal: AbortSignal,
+  executionSignal: AbortSignal | undefined,
   lifecycleSignal: AbortSignal | undefined,
 ): boolean {
-  return executionSignal.aborted || lifecycleSignal?.aborted === true;
+  return executionSignal?.aborted === true || lifecycleSignal?.aborted === true;
 }
 
 async function safelyExecute(action: () => Promise<unknown>): Promise<unknown> {

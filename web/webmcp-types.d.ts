@@ -16,7 +16,7 @@ interface WebMcpToolDefinition {
   readonly description: string;
   readonly inputSchema: Readonly<Record<string, unknown>>;
   readonly annotations?: WebMcpToolAnnotations;
-  execute(input: unknown, options: WebMcpToolExecuteOptions): Promise<unknown>;
+  execute(input: unknown, options?: WebMcpToolExecuteOptions): Promise<unknown>;
 }
 
 interface WebMcpToolRegistrationOptions {

@@ -175,7 +175,7 @@ describe("Handoff WebMCP registration", () => {
     failing.dispose();
   });
 
-  it("cancels a pending WebMCP operation when its page context changes", async () => {
+  it("cancels a pending host operation without execution options when context changes", async () => {
     let historySignal: AbortSignal | undefined;
     let resolveHistory: ((result: BrowserHistoryClientResult) => void) | undefined;
     const client: BrowserApiClient = {
@@ -203,7 +203,7 @@ describe("Handoff WebMCP registration", () => {
     const binding = bindHandoffWebMcpTools(workspace, host);
     await vi.waitFor(() => expect(historyTool).toBeDefined());
 
-    const execution = historyTool!.execute({}, { signal: new AbortController().signal });
+    const execution = historyTool!.execute({});
     await vi.waitFor(() => expect(historySignal).toBeDefined());
     workspace.changeSpaceKey();
     expect(historySignal?.aborted).toBe(true);

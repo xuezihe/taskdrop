@@ -196,6 +196,58 @@ describe("Handoff WebMCP tools", () => {
     expect(controller.getState()).toMatchObject({ kind: "ready", workingDraft: null });
   });
 
+  it("supports read tool hosts that omit per-execution options", async () => {
+    const controller = await readyController();
+    const tools = createHandoffWebMcpTools(controller);
+
+    await expect(tool(tools, "get_handoff_context").execute({})).resolves.toEqual({
+      code: "ABC001",
+      latestRevision: 1,
+      latestMarkdown: "# Initial",
+      latestOrigin: "mcp",
+      expiresAt: "2026-08-29T08:00:00.000Z",
+      workingDraft: null,
+    });
+    await expect(tool(tools, "get_revision_history").execute({})).resolves.toEqual(
+      history().revisions,
+    );
+    await expect(tool(tools, "read_revision").execute({ revision: 1 })).resolves.toEqual({
+      revision: 1,
+      markdown: "# Initial",
+      createdAt: "2026-08-28T08:00:00.000Z",
+      origin: "mcp",
+    });
+    expect(controller.getState()).toMatchObject({ kind: "ready", workingDraft: null });
+  });
+
+  it("supports write tool hosts that omit per-execution options", async () => {
+    const controller = await readyController();
+    const tools = createHandoffWebMcpTools(controller);
+
+    await expect(
+      tool(tools, "update_working_draft").execute({ markdown: "# Agent update" }),
+    ).resolves.toMatchObject({
+      latestRevision: 1,
+      workingDraft: {
+        baseRevision: 1,
+        markdown: "# Agent update",
+        lastModifiedVia: "webmcp",
+      },
+    });
+    await expect(tool(tools, "commit_working_draft").execute({})).resolves.toMatchObject({
+      ok: true,
+      revision: 2,
+      latestRevision: 2,
+      markdown: "# Agent update",
+      origin: "webmcp",
+    });
+    expect(controller.getState()).toMatchObject({
+      kind: "ready",
+      committed: { revision: 2, origin: "webmcp" },
+      workingDraft: null,
+    });
+  });
+
   it("updates the Human-visible Draft and returns the resulting Margin-style context", async () => {
     const controller = await readyController();
     const tools = createHandoffWebMcpTools(controller);
