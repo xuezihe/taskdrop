@@ -8,3 +8,16 @@ coverage/
 *.log
 deploy/server/*.env
 !deploy/server/*.env.example
+Caddyfile
+
+# Maintainer-local planning and agent configuration
+.scratch/
+memory-bank/
+.agents/
+.codex/
+.devin/
+AGENTS.md
+CONTEXT.md
+docs/agents/
+docs/notes.md
+docs/webmcp-milestone-spec.md

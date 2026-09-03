@@ -22,18 +22,17 @@ The complete Query URL is also a credential.
 
 ## Client status
 
-| Client | Configuration source | TaskDrop status |
-| --- | --- | --- |
-| Codex | Official client documentation | Observed in private dogfood; exact build not recorded |
-| Claude Code | Official client documentation | Configuration documented; TaskDrop not yet verified |
-| WorkBuddy | Official client documentation | Configuration UI documented; TaskDrop not yet verified |
-| Cursor | Official client documentation | Configuration documented; TaskDrop not yet verified |
-| Devin | Client-specific configuration | Observed in private dogfood; exact build not recorded |
-| Other MCP clients | Client-specific | Not verified |
+| Client            | Configuration source          | TaskDrop status                                        |
+| ----------------- | ----------------------------- | ------------------------------------------------------ |
+| Codex             | Official client documentation | Exercised with TaskDrop; verify the installed release  |
+| Claude Code       | Official client documentation | Configuration documented; TaskDrop not yet verified    |
+| WorkBuddy         | Official client documentation | Configuration UI documented; TaskDrop not yet verified |
+| Cursor            | Official client documentation | Configuration documented; TaskDrop not yet verified    |
+| Devin             | Client-specific configuration | Exercised with TaskDrop; verify the installed release  |
+| Other MCP clients | Client-specific               | Not verified                                           |
 
-The observations above were current on 2026-08-17. If a client release behaves
-differently, use its current MCP documentation and report the exact client
-version with the result.
+If a client release behaves differently, use its current MCP documentation and
+report the exact client version with the result.
 
 ## Codex
 
@@ -193,7 +192,7 @@ curl --fail --silent --show-error https://taskdrop.xuezihe.com/health
 Expected response:
 
 ```json
-{"status":"ok"}
+{ "status": "ok" }
 ```
 
 Then reconnect the MCP server in the client and confirm that its TaskDrop tools

@@ -1,8 +1,17 @@
 {
   "name": "taskdrop",
   "version": "0.0.0",
+  "description": "A temporary, versioned handoff layer for moving work between AI clients.",
   "private": true,
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xuezihe/taskdrop.git"
+  },
+  "homepage": "https://github.com/xuezihe/taskdrop#readme",
+  "bugs": {
+    "url": "https://github.com/xuezihe/taskdrop/issues"
+  },
   "type": "module",
   "packageManager": "pnpm@10.13.1",
   "engines": {
@@ -13,18 +22,13 @@
     "build": "tsc -p tsconfig.build.json && rm -rf dist/production/migrations && cp -r src/production/migrations dist/production/migrations",
     "build:web": "vite build --config web/vite.config.ts",
     "dev:web": "vite --config web/vite.config.ts",
+    "start": "node dist/production/main.js",
     "format": "prettier --write \"src/**/*.ts\" \"web/**/*.{ts,css,html}\" \"test/**/*.ts\" \"*.{json,ts,mjs}\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"web/**/*.{ts,css,html}\" \"test/**/*.ts\" \"*.{json,ts,mjs}\"",
     "check": "tsc -p tsconfig.json --noEmit && tsc -p web/tsconfig.json --noEmit && tsc -p tsconfig.web-test.json --noEmit",
     "test": "vitest run",
     "test:db": "vitest run --config vitest.db.config.ts",
     "test:watch": "vitest",
-    "prototype:p1": "pnpm build && node dist/prototypes/p1-codex-mcp-smoke/server.js",
-    "prototype:p2": "pnpm build && node dist/prototypes/p2-minimum-handoff/server.js",
-    "prototype:p3": "pnpm build && node dist/prototypes/p3-chatgpt-hosted-compatibility/launcher.js",
-    "prototype:p5": "pnpm build && node dist/prototypes/p5-real-user-handoff/server.js",
-    "prototype:p6": "pnpm build && node dist/prototypes/p6-dual-era-contract/runner.js",
-    "prototype:setup-cli": "pnpm build && node dist/prototypes/p7-space-key-cli/cli.js",
     "setup:cli": "pnpm build && node dist/production/setup-cli.js",
     "admin:cli": "pnpm build && node dist/production/admin-cli.js",
     "migrate": "pnpm build && node dist/production/migrate.js",

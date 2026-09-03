@@ -1,8 +1,8 @@
-# TaskDrop dogfood user guide
+# TaskDrop user guide
 
 TaskDrop moves current work between AI clients through temporary, versioned
-Markdown Handoffs. This guide covers the private M3 dogfood service. It is not
-a Public Beta compatibility or availability promise.
+Markdown Handoffs. You can use a hosted TaskDrop endpoint or deploy the service
+yourself.
 
 ## The five terms users need
 
@@ -80,7 +80,7 @@ curl --fail --silent --show-error <YOUR_TASKDROP_ORIGIN>/health
 Expected body:
 
 ```json
-{"status":"ok"}
+{ "status": "ok" }
 ```
 
 ## Install the TaskDrop Skill
@@ -178,9 +178,10 @@ Review sensitive content before creating or updating a Handoff. The Skill also
 removes credentials it recognizes, but the user remains responsible for what is
 shared.
 
-## Observed dogfood clients
+## Client compatibility notes
 
-On 2026-08-13, the operator reported successful private dogfood use from Codex
-and Devin, including modern and legacy MCP entry behavior. Exact client build
-versions were not recorded, so this is an observation, not a general support
-claim. WorkBuddy and other clients remain unverified.
+TaskDrop has been exercised with Codex and Devin through remote MCP. Client
+configuration and transport behavior can change between releases, so use the
+current client documentation and report the exact client version when filing a
+compatibility issue. Configuration examples for other clients are guidance,
+not a guarantee that every client release has been verified.

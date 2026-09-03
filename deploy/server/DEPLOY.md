@@ -26,8 +26,8 @@ on loopback. `nohup` does not provide boot startup, a dedicated service
 identity, or automatic crash recovery; moving the Application to systemd
 remains later hardening.
 
-The commands assume a root shell and an existing `dev` checkout at
-`/root/Proj/taskDrop`. Replace `<TASKDROP_PUBLIC_HOST>` with the public HTTPS
+The commands assume a root shell and an existing `main` checkout at
+`/opt/taskdrop`. Replace `<TASKDROP_PUBLIC_HOST>` with the public HTTPS
 hostname. The documented topology serves the Workspace, Browser API, and
 Remote MCP from that hostname. Do not paste real credentials into this guide,
 shell arguments, tickets, or chat.
@@ -52,7 +52,7 @@ Install the following from their official Debian instructions:
 Confirm the environment:
 
 ```bash
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 git branch --show-current
 git rev-parse HEAD
 node --version
@@ -64,7 +64,7 @@ docker compose version
 caddy version
 ```
 
-The branch must be `dev`, Node.js must be 24.x, pnpm must be 10.13.x, and Node
+The branch must be `main`, Node.js must be 24.x, pnpm must be 10.13.x, and Node
 must resolve to `/usr/bin/node` for the commands below.
 
 Create proxied Cloudflare DNS records for the public hostname. An IPv6-only
@@ -112,9 +112,9 @@ unset password
 
 The example files beside this guide document the required names. Never use
 their placeholder password in a deployment. `RETENTION_WINDOW_MS=604800000`
-is seven days; Production accepts one hour through 30 days. Before a public
-Challenge release, choose a window that keeps disposable judge Handoffs usable
-for the intended judging period, without exceeding the supported maximum.
+is seven days; Production accepts one hour through 30 days. Choose a window
+that keeps temporary Handoffs usable for the intended workflow without
+exceeding the supported maximum.
 Document the chosen duration, and do not imply that a read extends it: only a
 successful Revision append refreshes retention.
 
@@ -123,7 +123,7 @@ successful Revision append refreshes retention.
 From the repository root:
 
 ```bash
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 docker compose -f deploy/server/compose.yml up -d
 docker compose -f deploy/server/compose.yml ps
 ```
@@ -136,7 +136,7 @@ volume. Do not use `down --volumes` on retained data.
 ## 4. Install, verify, build, migrate, and publish the Workspace
 
 ```bash
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 pnpm install --frozen-lockfile
 TASKDROP_MCP_ORIGIN="https://$taskdrop_public_host" pnpm verify
 ```
@@ -155,7 +155,7 @@ Apply migrations explicitly before first startup and before restarting an
 updated build:
 
 ```bash
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 set -a
 . /etc/taskdrop/taskdrop.env
 set +a
@@ -171,7 +171,7 @@ Use one immutable directory per Git commit, then atomically switch the
 `current` symlink:
 
 ```bash
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 release_id="$(git rev-parse --short=12 HEAD)"
 web_release="/var/www/taskdrop/releases/$release_id"
 test ! -e "$web_release"
@@ -189,9 +189,9 @@ unset release_id web_release
 ```
 
 Do not point the Caddy system service directly at
-`/root/Proj/taskDrop/dist/landing`: the service normally cannot traverse
-`/root`, and an in-place rebuild would make rollback ambiguous. Retain at least
-the current and previous Web release directories until acceptance passes.
+`/opt/taskdrop/dist/landing`: an in-place rebuild would make rollback ambiguous
+and could expose a partially written release. Retain at least the current and
+previous Web release directories until verification passes.
 
 ## 5. Start the Application with nohup
 
@@ -206,7 +206,7 @@ from the same shell that starts Node:
 
 ```bash
 install -d -o root -g root -m 0750 /var/log/taskdrop
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 set -a
 . /etc/taskdrop/taskdrop.env
 set +a
@@ -349,7 +349,7 @@ Finally, use the ChatGPT Desktop built-in browser against the public HTTPS URL:
 Chrome is an auxiliary compatibility check and cannot replace this primary
 runtime smoke.
 
-## 8. Record acceptance
+## 8. Record release verification
 
 Record only:
 
@@ -363,4 +363,4 @@ Record only:
 
 Never record a Space Key, Handoff Code, Markdown, database URL, Authorization
 value, credential-bearing Query URL, or complete client configuration. Continue
-with the Operator acceptance commands in [RUNBOOK.md](./RUNBOOK.md).
+with the Operator verification commands in [RUNBOOK.md](./RUNBOOK.md).

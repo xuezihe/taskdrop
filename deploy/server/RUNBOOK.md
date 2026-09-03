@@ -1,8 +1,8 @@
 # TaskDrop single-server Operator Runbook
 
 This Runbook operates the public single-server deployment described in
-[DEPLOY.md](./DEPLOY.md). Commands assume a root shell, the `dev` checkout at
-`/root/Proj/taskDrop`, PostgreSQL from `deploy/server/compose.yml`, and the
+[DEPLOY.md](./DEPLOY.md). Commands assume a root shell, the `main` checkout at
+`/opt/taskdrop`, PostgreSQL from `deploy/server/compose.yml`, and the
 Application managed by `nohup`. Caddy serves the active Web artifact through
 `/var/www/taskdrop/current` and proxies the same-origin Browser API.
 
@@ -19,7 +19,7 @@ taskdrop_public_host=taskdrop.example.com
 ## Status and health
 
 ```bash
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 cat /run/taskdrop-application.pid
 ps -fp "$(cat /run/taskdrop-application.pid)"
 ss -lntp | grep ':3000'
@@ -60,7 +60,7 @@ starting another TaskDrop process.
 ## Start the Application
 
 ```bash
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 test ! -f /run/taskdrop-application.pid || \
   ! kill -0 "$(cat /run/taskdrop-application.pid)" 2>/dev/null
 install -d -o root -g root -m 0750 /var/log/taskdrop
@@ -117,7 +117,7 @@ After restart, read one live Handoff again to verify persistence.
 ```bash
 tail -n 200 /var/log/taskdrop/application.log
 journalctl -u caddy.service --since today --no-pager
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 docker compose -f deploy/server/compose.yml logs --since 24h postgres
 ```
 
@@ -131,7 +131,7 @@ matching value into retained output or paste the results elsewhere.
 Load the database environment without printing it:
 
 ```bash
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 set -a
 . /etc/taskdrop/taskdrop.env
 set +a
@@ -171,7 +171,7 @@ An ambiguous Fingerprint is refused rather than silently selecting a Space.
 ## Run one manual cleanup pass
 
 ```bash
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 set -a
 . /etc/taskdrop/taskdrop.env
 set +a
@@ -194,7 +194,7 @@ The backup contains private Handoff Markdown. Keep it outside the repository
 with mode `0600` and apply an appropriate retention policy.
 
 ```bash
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 install -d -o root -g root -m 0700 /root/backups/taskdrop
 umask 077
 backup_path="/root/backups/taskdrop/taskdrop-$(date -u +%Y%m%dT%H%M%SZ).dump"
@@ -210,16 +210,16 @@ This is a practical logical backup, not a complete disaster-recovery program.
 This deployment does not provide point-in-time recovery, automated restore,
 cross-host replication, or a restore drill.
 
-## Upgrade the dev checkout
+## Upgrade the main checkout
 
 Record the current commit outside any credential-bearing file. Stop if the
 working tree is not clean; never overwrite local changes to force an upgrade.
 
 ```bash
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 git status --short
 git rev-parse HEAD
-git pull --ff-only origin dev
+git pull --ff-only origin main
 pnpm install --frozen-lockfile
 TASKDROP_MCP_ORIGIN="https://$taskdrop_public_host" pnpm verify
 ```
@@ -261,7 +261,7 @@ Rollback is safe only when applied migrations remain compatible with the older
 Application. TaskDrop does not automate down migrations.
 
 ```bash
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 git status --short
 git switch --detach <KNOWN_GOOD_COMMIT>
 pnpm install --frozen-lockfile
@@ -276,7 +276,7 @@ rollback requires a schema reversal, stop: TaskDrop has no automatic down
 migration. Restore an operator-approved PostgreSQL backup only through the
 separate database recovery decision.
 
-Return to ongoing development later with `git switch dev` after checking that
+Return to the current release later with `git switch main` after checking that
 the working tree is clean. Keep the failed Web release for diagnosis until it
 is safe to remove; do not delete the active or previous release by an
 unresolved glob.
@@ -300,7 +300,7 @@ entry points exist, and PostgreSQL is healthy. Do not print `DATABASE_URL`.
 ### PostgreSQL is unavailable
 
 ```bash
-cd /root/Proj/taskDrop
+cd /opt/taskdrop
 docker compose -f deploy/server/compose.yml ps
 docker compose -f deploy/server/compose.yml logs --since 30m postgres
 ss -lntp | grep ':5432' || true
@@ -349,7 +349,7 @@ caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
 The Caddy site must serve `/var/www/taskdrop/current`, proxy `/api/*`, and use
 `/index.html` as the static fallback. Do not point the Caddy service into
-`/root/Proj/taskDrop`. If `/` works but `/handoff/:code` returns 404, inspect
+`/opt/taskdrop`. If `/` works but `/handoff/:code` returns 404, inspect
 the `try_files` fallback. If the page loads but API calls fail, verify that
 `/api/*` is proxied without stripping `/api`.
 

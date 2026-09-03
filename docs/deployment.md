@@ -140,11 +140,8 @@ Remote MCP Revision N
 ```
 
 Chrome is an auxiliary compatibility check and does not replace the primary
-runtime. Keep release evidence precise: the current local acceptance exercised
-an exact 10,000-character Working Draft and the maintainer accepted it for this
-milestone; it did not execute the original 64--128 KiB manual fixture. The
-public deployment smoke and Remote MCP read-back must still run against the
-deployed HTTPS origin before the release is claimed as accepted.
+runtime. Run the public deployment smoke and Remote MCP read-back against the
+deployed HTTPS origin before considering a release verified.
 
 Also inspect the deployed response policies in the primary runtime. WebMCP is
 subject to browser security requirements, including the `tools` Permissions

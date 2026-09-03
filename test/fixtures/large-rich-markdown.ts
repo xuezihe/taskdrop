@@ -1,5 +1,5 @@
 /**
- * One deterministic representative large Markdown document for Issue 08 Gate B.
+ * One deterministic representative large Markdown document for the payload-size tests.
  *
  * The fixture targets roughly 96 KiB (64–128 KiB band) and exercises every
  * construct in the supported rich-editing profile: headings, paragraphs,

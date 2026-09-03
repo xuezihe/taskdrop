@@ -6,10 +6,11 @@
 ## 启动数据库
 
 ```bash
-docker compose -f db/compose.yml up -d
+docker compose --env-file .env -f db/compose.yml up -d
 ```
 
-启动后 PostgreSQL 18 监听 `localhost:5432`，默认库/用户/密码均为 `taskdrop`。
+启动后 PostgreSQL 18 仅监听 `127.0.0.1:5432`。数据库和用户默认为
+`taskdrop`，密码必须通过根目录 `.env` 中的 `POSTGRES_PASSWORD` 显式提供。
 
 对应的连接串（开发用）：
 
@@ -20,8 +21,8 @@ DATABASE_URL=postgres://taskdrop:REPLACE_WITH_PASSWORD@localhost:5432/taskdrop
 ## 停止与清理
 
 ```bash
-docker compose -f db/compose.yml down        # 停止容器，保留数据卷
-docker compose -f db/compose.yml down -v     # 同时删除数据卷
+docker compose --env-file .env -f db/compose.yml down        # 停止容器，保留数据卷
+docker compose --env-file .env -f db/compose.yml down -v     # 同时删除数据卷
 ```
 
 ## 与应用的关系
