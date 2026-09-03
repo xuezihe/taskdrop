@@ -305,6 +305,7 @@ describe("Handoff Workspace UI", () => {
     expect(rows[1]?.querySelector("time")?.getAttribute("datetime")).toBe(
       "2026-08-28T10:00:00.000Z",
     );
+    expect(rows[1]?.querySelector("time")?.textContent).toMatch(/^Aug /);
     expect(rows[0]?.classList.contains("workspace-history-row-active")).toBe(true);
 
     root.remove();
